@@ -4,7 +4,6 @@ import Discord, {
   MessageButton,
   MessageEmbed,
   MessageOptions,
-  MessageSelectMenu,
 } from "discord.js";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -438,7 +437,7 @@ const startGame = (channelId: string): string => {
   };
 
   store.dispatch({ type: CREATE_GAME, payload: game });
-  return `Game started.`;
+  return `New game started.`;
 };
 
 const updateGame = (action: UpdateGame) => {
@@ -517,9 +516,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
     payload: { channelId, player },
   });
 
-  const msgs = [
-    `Added ${mentionPlayer(playerId)} (${nextNumPlayers}/${totalPlayers}).`,
-  ];
+  const msgs = [`Added ${mentionPlayer(playerId)}.`, getStatus(channelId)];
 
   if (nextNumPlayers === totalPlayers) {
     updateGame({
@@ -551,7 +548,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
 
         sendMsg(
           channelId,
-          `Removed (not ready): ${unreadyPlayerIds.join(", ")}`
+          `Removed (not ready): ${unreadyPlayerIds
+            .map((p) => mentionPlayer(p))
+            .join(" ")}`
         );
       }, READY_TIMEOUT);
 
@@ -567,7 +566,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       // Ask unready players to ready
       sendMsg(
         channelId,
-        `Some players are not ready: ${unreadyPlayerIds.join(", ")}. Waiting ${
+        `Some players are not ready: ${unreadyPlayerIds
+          .map((p) => mentionPlayer(p))
+          .join(" ")}. Waiting ${
           READY_TIMEOUT / 1000
         } seconds for them to ready.`
       );
@@ -631,7 +632,7 @@ const startMapVote = (channelId: string) => {
   const channel = getDiscordChannel(channelId);
 
   const embed = getEmbed(
-    `Map vote starting now. Please select the map you want to play.`
+    `Map vote starting now. Please click the map you want to play.`
   );
 
   if (channel?.isText()) {
@@ -679,13 +680,39 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
     msgs.push(`Cancelling ready check.`);
   }
 
-  const game = getGame(channelId);
-  const numPlayers = getPlayers(game).length;
-  const totalPlayers = gameModeToNumPlayers(game.mode);
-  msgs.push(
-    `${mentionPlayer(playerId)} removed (${numPlayers}/${totalPlayers})`
-  );
+  msgs.push(`Removed ${mentionPlayer(playerId)}.`);
+  msgs.push(getStatus(channelId));
   return msgs;
+};
+
+const getStatus = (channelId: string): string => {
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return `This channel has not been set up.`;
+  }
+
+  const existingGame = getGame(channelId);
+  if (!existingGame) {
+    return `No game started. Can't get status.`;
+  }
+
+  const game = getGame(channelId);
+  const players = getPlayers(game);
+  const numPlayers = players.length;
+  const totalPlayers = gameModeToNumPlayers(game.mode);
+
+  let out = `Players (${numPlayers}/${totalPlayers}): `;
+  const now = Date.now();
+  for (const player of players) {
+    out += `${mentionPlayer(player.id)}`;
+    const isReady = isPlayerReady(now, player.readyUntil);
+    if (isReady) {
+      out += `:thumbsup: `;
+    } else {
+      out += `:zzz: `;
+    }
+  }
+  return out;
 };
 
 const readyPlayer = (
@@ -832,7 +859,7 @@ const mapVoteComplete = async (channelId: string) => {
   const playerIds = getPlayers(game).map((p) => p.id);
   sendMsg(
     channelId,
-    `Ready to go. Join the server now. Check your DMs for a connect link.`,
+    `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
     `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
   );
 
@@ -1095,6 +1122,7 @@ export enum Commands {
   Ping = "ping",
   Setup = "setup",
   Start = "start",
+  Status = "status",
   Add = "add",
   Remove = "remove",
   Ready = "ready",
@@ -1132,7 +1160,7 @@ export const run = () => {
 
     switch (commandName) {
       case Commands.Ping: {
-        interaction.reply({ embeds: [getEmbed("Pong!")] });
+        interaction.reply({ ephemeral: true, embeds: [getEmbed("Pong!")] });
         break;
       }
       case Commands.Setup: {
@@ -1143,6 +1171,11 @@ export const run = () => {
       }
       case Commands.Start: {
         const msg = startGame(channelId);
+        interaction.reply({ embeds: [getEmbed(msg)] });
+        break;
+      }
+      case Commands.Status: {
+        const msg = getStatus(channelId);
         interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
@@ -1180,7 +1213,7 @@ export const run = () => {
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
       const msg = mapVote(channelId, playerId, map);
-      interaction.reply({ embeds: [getEmbed(msg)] });
+      interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
     }
   });
 };

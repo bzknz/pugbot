@@ -33,6 +33,9 @@ const run = async () => {
       .setName(Commands.Start)
       .setDescription("Starts a new PUG"),
     new SlashCommandBuilder()
+      .setName(Commands.Status)
+      .setDescription("Get status of current PUG"),
+    new SlashCommandBuilder()
       .setName(Commands.Add)
       .setDescription("Adds to the PUG"),
     new SlashCommandBuilder()
