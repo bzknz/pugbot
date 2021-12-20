@@ -1,4 +1,11 @@
-import Discord, { Intents, MessageEmbed } from "discord.js";
+import Discord, {
+  Intents,
+  MessageActionRow,
+  MessageButton,
+  MessageEmbed,
+  MessageOptions,
+  MessageSelectMenu,
+} from "discord.js";
 import dotenv from "dotenv";
 import fs from "fs";
 import { createStore } from "redux";
@@ -61,6 +68,8 @@ type Channel = {
 type Channels = { [channelId: string]: Channel };
 
 type RootState = { games: Games; channels: Channels };
+
+const MAP_VOTE_PREFIX = "map-vote-";
 
 const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
 const CREATE_GAME = "CREATE_GAME";
@@ -163,6 +172,8 @@ const filterObjectByKeys = (object: any, keysToFilter: string[]) => {
     }
   }, {});
 };
+
+const mentionPlayer = (playerId: string) => `<@${playerId}>`;
 
 const reducer = (
   state: RootState = { games: {}, channels: {} },
@@ -310,13 +321,25 @@ const reducer = (
 
 const store = createStore(reducer);
 
-const sendMsg = async (channelId: string, msg: string) => {
+const getDiscordChannel = (channelId: string) =>
+  client.channels.cache.get(channelId);
+
+const sendMsg = async (
+  channelId: string,
+  embedText: string,
+  mainText?: string
+) => {
   // Send message on Discord
-  console.log(`${channelId}: ${msg}`);
-  const channel = client.channels.cache.get(channelId);
+  console.log(`${channelId}: ${embedText}`);
+  const channel = getDiscordChannel(channelId);
+
+  const msgObj: MessageOptions = { embeds: [getEmbed(embedText)] };
+  if (mainText) {
+    msgObj.content = mainText;
+  }
 
   if (channel?.isText()) {
-    channel.send({ embeds: [getEmbed(msg)] });
+    channel.send(msgObj);
   }
 };
 
@@ -461,12 +484,12 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
   }
 
   if (game.state !== GameState.AddRemove) {
-    return [`Can't add ${playerId} right now. Ignoring.`];
+    return [`Can't add ${mentionPlayer(playerId)} right now. Ignoring.`];
   }
 
   const isAdded = checkPlayerAdded(channelId, playerId);
   if (isAdded) {
-    return [`${playerId} is already added. Ignoring.`];
+    return [`${mentionPlayer(playerId)} is already added. Ignoring.`];
   }
 
   const prevNumPlayers = getPlayers(game).length;
@@ -494,7 +517,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
     payload: { channelId, player },
   });
 
-  const msgs = [`Added ${playerId} (${nextNumPlayers}/${totalPlayers})`];
+  const msgs = [
+    `Added ${mentionPlayer(playerId)} (${nextNumPlayers}/${totalPlayers}).`,
+  ];
 
   if (nextNumPlayers === totalPlayers) {
     updateGame({
@@ -585,12 +610,33 @@ const startMapVote = (channelId: string) => {
   const game = getGame(channelId);
   const maps = getGameModeMaps(game.mode);
 
-  let msg = `Map vote starting now. Please send just the number of the map you want to play.\n\n`;
+  const rows = [new MessageActionRow()];
 
   for (let x = 1; x <= maps.length; x++) {
-    msg += `${x}. ${maps[x - 1]}\n`;
+    let lastRow = rows[rows.length - 1];
+    if (lastRow.components.length === 5) {
+      // Need a new row
+      rows.push(new MessageActionRow());
+      lastRow = rows[rows.length - 1];
+    }
+    const mapName = maps[x - 1];
+    lastRow.addComponents(
+      new MessageButton()
+        .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
+        .setLabel(mapName)
+        .setStyle("SECONDARY")
+    );
   }
-  sendMsg(channelId, msg);
+
+  const channel = getDiscordChannel(channelId);
+
+  const embed = getEmbed(
+    `Map vote starting now. Please select the map you want to play.`
+  );
+
+  if (channel?.isText()) {
+    channel.send({ embeds: [embed], components: rows });
+  }
 };
 
 const removePlayer = (channelId: string, playerId: string): string[] => {
@@ -601,19 +647,19 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
 
   const existingGame = getGame(channelId);
   if (!existingGame) {
-    return [`No game started. Can't remove ${playerId}.`];
+    return [`No game started. Can't remove ${mentionPlayer(playerId)}.`];
   }
 
   const isAdded = checkPlayerAdded(channelId, playerId);
   if (!isAdded) {
-    return [`${playerId} is not added. Ignoring.`];
+    return [`${mentionPlayer(playerId)} is not added. Ignoring.`];
   }
 
   // Check for expected game state
   if (
     ![GameState.AddRemove, GameState.ReadyCheck].includes(existingGame.state)
   ) {
-    return [`Can't remove ${playerId} right now. Ignoring.`];
+    return [`Can't remove ${mentionPlayer(playerId)} right now. Ignoring.`];
   }
 
   store.dispatch({ type: REMOVE_PLAYER, payload: { channelId, playerId } });
@@ -636,7 +682,9 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
   const game = getGame(channelId);
   const numPlayers = getPlayers(game).length;
   const totalPlayers = gameModeToNumPlayers(game.mode);
-  msgs.push(`${playerId} removed (${numPlayers}/${totalPlayers})`);
+  msgs.push(
+    `${mentionPlayer(playerId)} removed (${numPlayers}/${totalPlayers})`
+  );
   return msgs;
 };
 
@@ -653,18 +701,18 @@ const readyPlayer = (
 
   const existingGame = getGame(channelId);
   if (!existingGame) {
-    return `No game started. Can't ready ${playerId}.`;
+    return `No game started. Can't ready ${mentionPlayer(playerId)}.`;
   }
 
   if (
     ![GameState.AddRemove, GameState.ReadyCheck].includes(existingGame.state)
   ) {
-    return `Can't ready ${playerId} right now. Ignoring.`;
+    return `Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`;
   }
 
   const isAdded = checkPlayerAdded(channelId, playerId);
   if (!isAdded) {
-    return `${playerId} is not added. Ignoring.`;
+    return `${mentionPlayer(playerId)} is not added. Ignoring.`;
   }
 
   const now = Date.now();
@@ -674,7 +722,7 @@ const readyPlayer = (
     payload: { channelId, playerId, readyUntil: now + normalizedTime },
   });
 
-  const msgs = `${playerId} is ready.`;
+  const msgs = `${mentionPlayer(playerId)} is ready.`;
 
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   if (unreadyPlayerIds.length === 0) {
@@ -784,7 +832,8 @@ const mapVoteComplete = async (channelId: string) => {
   const playerIds = getPlayers(game).map((p) => p.id);
   sendMsg(
     channelId,
-    `Ready to go. Join the server now ${playerIds.join(", ")}`
+    `Ready to go. Join the server now. Check your DMs for a connect link.`,
+    `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
   );
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
@@ -815,7 +864,7 @@ const mapVote = (
 
   const isAdded = checkPlayerAdded(channelId, playerId);
   if (!isAdded) {
-    return `${playerId} is not added. Ignoring vote.`;
+    return `${mentionPlayer(playerId)} is not added. Ignoring vote.`;
   }
 
   store.dispatch({
@@ -824,7 +873,7 @@ const mapVote = (
   });
 
   // Notify users about player vote
-  const msg = `${playerId} voted for ${mapVote}`;
+  const msg = `${mentionPlayer(playerId)} voted for ${mapVote}.`;
 
   const game = getGame(channelId);
 
@@ -1117,11 +1166,21 @@ export const run = () => {
         interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
-      // case Commands.MapVote: {
-      //   const msg = mapVote(channelId, playerId, );
-      //   interaction.reply(msg);
-      //   break;
-      // }
+    }
+  });
+
+  client.on("interactionCreate", (interaction) => {
+    if (!interaction.isButton()) {
+      return;
+    }
+
+    const { customId, channelId, user } = interaction;
+    const playerId = user.id;
+
+    if (customId.includes(MAP_VOTE_PREFIX)) {
+      const map = customId.split(MAP_VOTE_PREFIX)[1];
+      const msg = mapVote(channelId, playerId, map);
+      interaction.reply({ embeds: [getEmbed(msg)] });
     }
   });
 };
