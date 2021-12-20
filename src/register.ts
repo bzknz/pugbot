@@ -43,7 +43,13 @@ const run = async () => {
       .setDescription("Removes from the PUG"),
     new SlashCommandBuilder()
       .setName(Commands.Ready)
-      .setDescription("Readies up"),
+      .setDescription("Readies up")
+      .addNumberOption((option) =>
+        option
+          .setName("minutes")
+          .setDescription("The number of minutes you want to ready up for")
+          .setRequired(false)
+      ),
     new SlashCommandBuilder()
       .setName(Commands.Stop)
       .setDescription("Stops the PUG"),

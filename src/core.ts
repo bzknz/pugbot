@@ -329,7 +329,7 @@ const sendMsg = async (
   mainText?: string
 ) => {
   // Send message on Discord
-  console.log(`${channelId}: ${embedText}`);
+  // console.log(`${channelId}: ${embedText}`);
   const channel = getDiscordChannel(channelId);
 
   const msgObj: MessageOptions = { embeds: [getEmbed(embedText)] };
@@ -707,7 +707,7 @@ const getStatus = (channelId: string): string => {
     out += `${mentionPlayer(player.id)}`;
     const isReady = isPlayerReady(now, player.readyUntil);
     if (isReady) {
-      out += `:thumbsup: `;
+      out += `:ballot_box_with_check: `;
     } else {
       out += `:zzz: `;
     }
@@ -718,7 +718,7 @@ const getStatus = (channelId: string): string => {
 const readyPlayer = (
   channelId: string,
   playerId: string,
-  time = READY_TIMEOUT
+  time: number
 ): string => {
   // Ready the player up and then check if all players are ready
   const channel = getChannel(channelId);
@@ -744,15 +744,24 @@ const readyPlayer = (
 
   const now = Date.now();
   const normalizedTime = Math.max(Math.min(time, MAX_READY_FOR), MIN_READY_FOR);
+  const readyUntil = now + normalizedTime;
   store.dispatch({
     type: READY_PLAYER,
-    payload: { channelId, playerId, readyUntil: now + normalizedTime },
+    payload: { channelId, playerId, readyUntil },
   });
 
-  const msgs = `${mentionPlayer(playerId)} is ready.`;
+  const readyUntilDate = new Date(readyUntil);
+  const msgs = `${mentionPlayer(
+    playerId
+  )} is ready until ${readyUntilDate.toLocaleTimeString("en-ZA")}.`;
 
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
-  if (unreadyPlayerIds.length === 0) {
+  const game = getGame(channelId);
+  const players = getPlayers(game);
+  if (
+    unreadyPlayerIds.length === 0 &&
+    players.length === gameModeToNumPlayers(game.mode)
+  ) {
     startMapVote(channelId);
   }
   return msgs;
@@ -959,7 +968,7 @@ export const test = () => {
   startGame(testChannel1); // Should send error message
   addPlayer(testChannel1, `1`); // Should send error message
   removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`); // Should send error message
+  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
   stopGame(testChannel1); // Should send error message
 
@@ -967,7 +976,7 @@ export const test = () => {
 
   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
   removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`); // Should send error message
+  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
   stopGame(testChannel1); // Should send error message
 
   addPlayer(testChannel1, `1`); // Should start game
@@ -982,7 +991,7 @@ export const test = () => {
   startGame(testChannel1);
 
   startGame(testChannel1); // Should send error message
-  readyPlayer(testChannel1, `1`); // Should send error message
+  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
   removePlayer(testChannel1, `1`); // Should send error message
 
@@ -1012,7 +1021,7 @@ export const test = () => {
   startGame(testChannel1); // Should send error message
   addPlayer(testChannel1, `1`); // Should send error message
   removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`); // Should send error message
+  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
   stopGame(testChannel1); // Should send error message
 
@@ -1029,7 +1038,7 @@ export const test = () => {
   startGame(testChannel1); // Should send error message
   addPlayer(testChannel1, `1`); // Should send error message
   removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`); // Should send error message
+  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
   stopGame(testChannel1); // Should send error message
 
@@ -1063,7 +1072,7 @@ export const test = () => {
     mapVote(testChannel1, `invalid`, testMap1); // Should send error message
     stopGame(testChannel1); // Should send error message
 
-    readyPlayer(testChannel1, `12`); // Should work
+    readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR); // Should work
 
     removePlayer(testChannel1, `12`); // Should work - take back
     if (store.getState().games[testChannel1].state !== GameState.AddRemove) {
@@ -1074,7 +1083,7 @@ export const test = () => {
     addPlayer(testChannel1, `12`);
 
     for (let x = 0; x < 11; x++) {
-      readyPlayer(testChannel1, `${x + 1}`);
+      readyPlayer(testChannel1, `${x + 1}`, DEFAULT_READY_FOR);
     }
 
     // Check working when players do not ready up in time
@@ -1195,7 +1204,9 @@ export const run = () => {
         break;
       }
       case Commands.Ready: {
-        const msg = readyPlayer(channelId, playerId);
+        const minutesIn = interaction.options.getNumber("minutes");
+        const minutes = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
+        const msg = readyPlayer(channelId, playerId, minutes);
         interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
