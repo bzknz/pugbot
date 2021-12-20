@@ -1,0 +1,8 @@
+node_modules
+*~
+data
+!data/maps.json
+todo.txt
+.vscode
+dist
+.env
