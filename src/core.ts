@@ -69,6 +69,7 @@ type Channels = { [channelId: string]: Channel };
 type RootState = { games: Games; channels: Channels };
 
 const MAP_VOTE_PREFIX = "map-vote-";
+const READY_BUTTON = "ready";
 
 const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
 const CREATE_GAME = "CREATE_GAME";
@@ -548,9 +549,10 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
 
         sendMsg(
           channelId,
-          `Removed (not ready): ${unreadyPlayerIds
-            .map((p) => mentionPlayer(p))
-            .join(" ")}`
+          `Removed ${unreadyPlayerIds.length} unready player(s).\n${getStatus(
+            channelId
+          )}`,
+          `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
         );
       }, READY_TIMEOUT);
 
@@ -564,14 +566,28 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       });
 
       // Ask unready players to ready
-      sendMsg(
-        channelId,
-        `Some players are not ready: ${unreadyPlayerIds
-          .map((p) => mentionPlayer(p))
-          .join(" ")}. Waiting ${
-          READY_TIMEOUT / 1000
-        } seconds for them to ready.`
+      const row = new MessageActionRow().addComponents(
+        new MessageButton()
+          .setCustomId(READY_BUTTON)
+          .setLabel("Ready up")
+          .setStyle("SUCCESS")
       );
+
+      const channel = getDiscordChannel(channelId);
+
+      const embed = getEmbed(
+        `${unreadyPlayerIds.length} player(s) are not ready. Waiting ${
+          READY_TIMEOUT / 1000
+        } seconds for them. Click the button (or use the slash command) to ready up.`
+      );
+
+      if (channel?.isText()) {
+        channel.send({
+          embeds: [embed],
+          components: [row],
+          content: `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`,
+        });
+      }
     }
   }
   return msgs;
@@ -631,12 +647,19 @@ const startMapVote = (channelId: string) => {
 
   const channel = getDiscordChannel(channelId);
 
+  const players = getPlayers(game);
   const embed = getEmbed(
-    `Map vote starting now. Please click the map you want to play.`
+    `Map vote starting now. Please click the map you want to play. Waiting ${
+      MAP_VOTE_TIMEOUT / 1000
+    } seconds for votes.`
   );
 
   if (channel?.isText()) {
-    channel.send({ embeds: [embed], components: rows });
+    channel.send({
+      embeds: [embed],
+      components: rows,
+      content: players.map((p) => mentionPlayer(p.id)).join(" "),
+    });
   }
 };
 
@@ -769,7 +792,7 @@ const readyPlayer = (
 
 const findServer = async (): Promise<string> => {
   // TODO: Find a server with no players on it from ser of available servers
-  return "TODO";
+  return "-";
 };
 
 const setMapOnServer = async (socket: string, map: string) => {
@@ -815,9 +838,9 @@ const mapVoteComplete = async (channelId: string) => {
     );
     const randIndex = Math.round(Math.random() * (withMaxVotes.length - 1));
     winningMap = withMaxVotes[randIndex];
-    msgs.push(`**${winningMap}** was randomly selected as the winner.`);
+    msgs.push(`:map: **${winningMap} was randomly selected as the winner.**`);
   } else {
-    msgs.push(`**${winningMap}** won with ${maxVoteCount} votes.`);
+    msgs.push(`:map: **${winningMap} won with ${maxVoteCount} votes.**`);
   }
   updateGame({
     type: UPDATE_GAME,
@@ -830,7 +853,7 @@ const mapVoteComplete = async (channelId: string) => {
     },
   });
 
-  msgs.push(`Attempting to find an available server (no players connected)...`);
+  msgs.push(`TODO: Attempting to find an available server...`);
 
   sendMsg(channelId, msgs.join("\n"));
 
@@ -849,7 +872,7 @@ const mapVoteComplete = async (channelId: string) => {
 
   sendMsg(
     channelId,
-    `Found a server: ${socket}. Attempting to set the map to ${winningMap}...`
+    `TODO: Found a server. Attempting to set the map to ${winningMap}...`
   );
 
   await setMapOnServer(socket, winningMap);
@@ -1205,8 +1228,8 @@ export const run = () => {
       }
       case Commands.Ready: {
         const minutesIn = interaction.options.getNumber("minutes");
-        const minutes = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
-        const msg = readyPlayer(channelId, playerId, minutes);
+        const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
+        const msg = readyPlayer(channelId, playerId, readyFor);
         interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
@@ -1225,6 +1248,9 @@ export const run = () => {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
       const msg = mapVote(channelId, playerId, map);
       interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
+    } else if (customId === READY_BUTTON) {
+      const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
+      interaction.reply({ embeds: [getEmbed(msg)] });
     }
   });
 };
