@@ -10,7 +10,9 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { createStore } from "redux";
 import Gamedig from "gamedig";
-// import Rcon from "rcon";
+// @ts-ignore
+import Rcon from "rcon";
+import { getServers } from "dns";
 
 dotenv.config();
 
@@ -50,9 +52,9 @@ type Game = {
   startedAt: number;
   players: Players;
   readyCheckAt: null | number; // Used to track player readiness to a static value
-  readyTimeout: null | number;
+  readyTimeout: null | NodeJS.Timeout;
   mapVoteAt: null | number;
-  mapVoteTimeout: null | number;
+  mapVoteTimeout: null | NodeJS.Timeout;
   map: null | string;
   findingServerAt: null | number;
   settingMapAt: null | number;
@@ -73,6 +75,7 @@ type RootState = { games: Games; channels: Channels };
 
 const MAP_VOTE_PREFIX = "map-vote-";
 const READY_BUTTON = "ready";
+const VACATE_BUTTON_PREFIX = "vacate-";
 
 const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
 const CREATE_GAME = "CREATE_GAME";
@@ -571,7 +574,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
         payload: {
           channelId,
           state: GameState.ReadyCheck,
-          readyTimeout: +readyTimeout,
+          readyTimeout,
         },
       });
 
@@ -666,7 +669,7 @@ const startMapVote = (channelId: string) => {
       channelId,
       state: GameState.MapVote,
       mapVoteAt: Date.now(),
-      mapVoteTimeout: +mapVoteTimeout,
+      mapVoteTimeout,
     },
   });
 
@@ -850,41 +853,109 @@ const sleep = (ms: number) => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-const findServer = async (): Promise<string | null> => {
+const splitSocket = (socket: string): { ip: string; port: number } => {
+  const split = socket.split(":");
+  const ip = split[0];
+  const port = Number(split[1]);
+  return { ip, port };
+};
+
+const getEnvSockets = (): string[] => {
+  if (!process.env.TF2_SERVERS) {
+    throw new Error("No sockets/tf2 servers set!");
+  } else {
+    return process.env.TF2_SERVERS.split(",");
+  }
+};
+
+const getServerDetails = async (
+  socket: string
+): Promise<null | { numPlayers: number; map: string }> => {
+  const { ip, port } = splitSocket(socket);
+
+  try {
+    const response = await Gamedig.query({
+      type: GAME_ID,
+      maxAttempts: 3,
+      givenPortOnly: true,
+      host: ip,
+      port,
+    });
+    return { numPlayers: response.players.length, map: response.map };
+  } catch (e) {
+    console.log(`Error getting server response for ${socket}.`);
+    return null;
+  }
+};
+
+const findAvailableServer = async (): Promise<string | null> => {
   // Find a server with no players on it from set of available servers
-  const sockets = process.env.TF2_SERVERS?.split(",");
+  const sockets = getEnvSockets();
 
   if (sockets) {
     for (const socket of sockets) {
-      const split = socket.split(":");
-      const host = split[0];
-      const port = Number(split[1]);
-
-      try {
-        const response = await Gamedig.query({
-          type: GAME_ID,
-          maxAttempts: 3,
-          givenPortOnly: true,
-          host,
-          port,
-        });
-        if (response.players.length === 0) {
-          return socket;
-        }
-      } catch (e) {
-        console.log(`Error getting server response for ${socket}.`);
+      const details = await getServerDetails(socket);
+      if (details?.numPlayers === 0) {
+        return socket;
       }
     }
   }
   return null;
 };
 
+const RCON_TIMEOUT = 5000;
+
 const setMapOnServer = async (socket: string, map: string) => {
-  // TODO: Send rcon command to change the map on the server
+  // Send rcon command to change the map on the server
 };
 
-const vacate = (socket: string) => {
-  // TODO: Send rcon command to kick players from the server
+const vacate = async (socket: string): Promise<string> => {
+  // Send rcon command to kick players from the server
+  const { ip, port } = splitSocket(socket);
+  const password = process.env.RCON_PASSWORD;
+  const conn = new Rcon(ip, port, password);
+
+  const vacatePromise: Promise<string> = new Promise((resolve) => {
+    const msgs: (null | string)[] = [];
+    conn
+      .on("auth", () => {
+        console.log("Authenticated");
+        console.log("Sending command: kickall");
+        conn.send("kickall");
+      })
+      .on("response", (str: string) => {
+        const msg = str ? "Response:\n```" + str + "```" : null;
+        console.log(msg);
+        msgs.push(msg);
+        if (msgs.length == 2) {
+          // Auth and response from kick command
+          resolve(msgs.filter((m) => m).join("\n"));
+        }
+      })
+      .on("error", (err: string) => {
+        const msg = "Error:\n```" + `${err ? err : "No error message"}` + "```";
+        console.log(msg);
+        msgs.push(msg);
+        resolve(msgs.filter((m) => m).join("\n"));
+      })
+      .on("end", () => {
+        const msg = "Connection closed.";
+        console.log(msg);
+        msgs.push(msg);
+        resolve(msgs.filter((m) => m).join("\n"));
+      });
+  });
+
+  conn.connect();
+
+  const timeoutPromise: Promise<string> = new Promise((resolve) => {
+    sleep(RCON_TIMEOUT).then(() => {
+      resolve("Error: Timed out.");
+    });
+  });
+
+  const msg = await Promise.any([vacatePromise, timeoutPromise]);
+  return msg;
 };
 
 const getMapVoteCounts = (channelId: string) => {
@@ -941,20 +1012,22 @@ const mapVoteComplete = async (channelId: string) => {
   });
 
   msgs.push(
-    `Attempting to find an available server (${FIND_SERVER_ATTEMPTS} attempts at a ~${
+    `:mag_right: Attempting to find an available server (${FIND_SERVER_ATTEMPTS} attempts at a ~${
       FIND_SERVER_INTERVAL / 1000
     }s interval [~${(
       (FIND_SERVER_ATTEMPTS * FIND_SERVER_INTERVAL) /
       1000 /
       60
-    ).toFixed(0)}min timeout])...`
+    ).toFixed(
+      0
+    )}min timeout])... An admin can /vacate to kick all players from a server.`
   );
 
   sendMsg(channelId, msgs.join("\n"));
 
   let socket: null | string = null;
   for (let x = 0; x < FIND_SERVER_ATTEMPTS; x++) {
-    socket = await findServer();
+    socket = await findAvailableServer();
     if (socket) {
       break;
     } else {
@@ -1008,14 +1081,22 @@ const mapVoteComplete = async (channelId: string) => {
   } else {
     sendMsg(
       channelId,
-      `Could not find an available server within the time limit.`
+      `:exclamation: **Could not find an available server. If one is available, please connect now.**\nStopped game.`
     );
   }
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
   const game = getGame(channelId);
   const path = `${GAMES_PATH}/${Date.now()}.json`;
-  fs.writeFileSync(path, JSON.stringify(game, null, 2), "utf-8");
+  // Set timers to null if they are set (can't stringify)
+  if (game.readyTimeout) {
+    game.readyTimeout = null;
+  }
+  if (game.mapVoteTimeout) {
+    game.mapVoteTimeout = null;
+  }
+  const stringified = JSON.stringify(game, null, 2);
+  fs.writeFileSync(path, stringified, "utf-8");
 
   store.dispatch({ type: REMOVE_GAME, payload: channelId });
 };
@@ -1057,7 +1138,7 @@ const mapVote = (
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
   if (numVotes === gameModeToNumPlayers(game.mode)) {
     if (game.mapVoteTimeout) {
-      clearTimeout(game.mapVoteTimeout as number);
+      clearTimeout(game.mapVoteTimeout);
       updateGame({
         type: UPDATE_GAME,
         payload: { channelId, mapVoteTimeout: null },
@@ -1276,6 +1357,7 @@ export enum Commands {
   Add = "add",
   Remove = "remove",
   Kick = "kick",
+  Vacate = "vacate",
   Ready = "ready",
   MapVote = "vote-map",
   Stop = "stop",
@@ -1304,6 +1386,7 @@ const hasPermission = (
 };
 
 export const run = () => {
+  getEnvSockets(); // Sanity check TF2 servers set correctly in the .env file
   setUpDataDirs();
   loadChannels();
 
@@ -1320,7 +1403,6 @@ export const run = () => {
 
     const { commandName, channelId, user } = interaction;
     const playerId = user.id;
-
     const playerPermissions = interaction.member.permissions;
 
     switch (commandName) {
@@ -1357,16 +1439,14 @@ export const run = () => {
         break;
       }
       case Commands.Stop: {
-        if (
-          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_MESSAGES)
-        ) {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
           const msg = stopGame(channelId);
           interaction.reply({ embeds: [getEmbed(msg)] });
         } else {
           interaction.reply({
             embeds: [
               getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_MESSAGES permission.`
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
               ),
             ],
           });
@@ -1384,7 +1464,7 @@ export const run = () => {
         break;
       }
       case Commands.Kick: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.KICK_MEMBERS)) {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
           const targetPlayer = interaction.options.getUser("user");
           if (targetPlayer) {
             const msgs = kickPlayer(channelId, targetPlayer.id);
@@ -1398,7 +1478,7 @@ export const run = () => {
           interaction.reply({
             embeds: [
               getEmbed(
-                `${NO_PERMISSION_MSG} You need the KICK_MEMBERS permission.`
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
               ),
             ],
           });
@@ -1412,16 +1492,58 @@ export const run = () => {
         interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
+      case Commands.Vacate: {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+          // Send the user button options asking which server to vacate from.
+
+          await interaction.deferReply({ ephemeral: true });
+
+          const row = new MessageActionRow();
+          const sockets = getEnvSockets();
+          for (const socket of sockets) {
+            const details = await getServerDetails(socket);
+            row.addComponents(
+              new MessageButton()
+                .setCustomId(`${VACATE_BUTTON_PREFIX}${socket}`)
+                .setLabel(
+                  `Vacate ${socket} (No. connected: ${
+                    details?.numPlayers ?? "unknown"
+                  }. Map: ${details?.map ?? "unknown"})`
+                )
+                .setStyle("DANGER")
+            );
+          }
+
+          interaction.editReply({
+            embeds: [
+              getEmbed(
+                "Please click the server you want to vacate. Make sure there is not a game currently happening on it!"
+              ),
+            ],
+            components: [row],
+          });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+              ),
+            ],
+          });
+        }
+        break;
+      }
     }
   });
 
-  client.on("interactionCreate", (interaction) => {
+  client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) {
       return;
     }
 
     const { customId, channelId, user } = interaction;
     const playerId = user.id;
+    const playerPermissions = interaction.member.permissions;
 
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
@@ -1430,6 +1552,21 @@ export const run = () => {
     } else if (customId === READY_BUTTON) {
       const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
       interaction.reply({ embeds: [getEmbed(msg)] });
+    } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
+      if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+        await interaction.deferReply();
+        const socket = customId.split(VACATE_BUTTON_PREFIX)[1];
+        const msg = await vacate(socket);
+        interaction.editReply({ content: msg });
+      } else {
+        interaction.editReply({
+          embeds: [
+            getEmbed(
+              `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+            ),
+          ],
+        });
+      }
     }
   });
 };

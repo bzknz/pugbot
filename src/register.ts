@@ -62,6 +62,11 @@ const run = async () => {
     new SlashCommandBuilder()
       .setName(Commands.Stop)
       .setDescription("Stops the PUG"),
+    new SlashCommandBuilder()
+      .setName(Commands.Vacate)
+      .setDescription(
+        "Kick all players from a TF2 server. You will be asked (buttons) which server to kick players from."
+      ),
   ].map((command) => command.toJSON());
 
   const rest = new REST({ version: "9" }).setToken(token);
