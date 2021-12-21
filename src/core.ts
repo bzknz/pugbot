@@ -9,6 +9,8 @@ import Discord, {
 import dotenv from "dotenv";
 import fs from "fs";
 import { createStore } from "redux";
+import Gamedig from "gamedig";
+// import Rcon from "rcon";
 
 dotenv.config();
 
@@ -826,7 +828,9 @@ const readyPlayer = (
   const readyUntilDate = new Date(readyUntil);
   const msgs = `${mentionPlayer(
     playerId
-  )} is ready until ${readyUntilDate.toLocaleTimeString("en-ZA")}.`;
+  )} is ready until ${readyUntilDate.toLocaleTimeString("en-ZA")}.\n${getStatus(
+    channelId
+  )}`;
 
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const game = getGame(channelId);
@@ -840,15 +844,39 @@ const readyPlayer = (
   return msgs;
 };
 
+const GAME_ID = "tf2";
+
+const sleep = (ms: number) => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
+
 const findServer = async (): Promise<string | null> => {
-  // TODO: Find a server with no players on it from set of available servers
-  // TODO: Timeout on finding a server (failure)
+  // Find a server with no players on it from set of available servers
   const sockets = process.env.TF2_SERVERS?.split(",");
+
   if (sockets) {
-    return sockets[0];
-  } else {
-    return null;
+    for (const socket of sockets) {
+      const split = socket.split(":");
+      const host = split[0];
+      const port = Number(split[1]);
+
+      try {
+        const response = await Gamedig.query({
+          type: GAME_ID,
+          maxAttempts: 3,
+          givenPortOnly: true,
+          host,
+          port,
+        });
+        if (response.players.length === 0) {
+          return socket;
+        }
+      } catch (e) {
+        console.log(`Error getting server response for ${socket}.`);
+      }
+    }
   }
+  return null;
 };
 
 const setMapOnServer = async (socket: string, map: string) => {
@@ -877,6 +905,9 @@ const getMapVoteCounts = (channelId: string) => {
   }
   return voteCounts;
 };
+
+const FIND_SERVER_ATTEMPTS = 60;
+const FIND_SERVER_INTERVAL = 5000;
 
 const mapVoteComplete = async (channelId: string) => {
   const voteCounts = getMapVoteCounts(channelId);
@@ -909,11 +940,27 @@ const mapVoteComplete = async (channelId: string) => {
     },
   });
 
-  msgs.push(`TODO: Attempting to find an available server...`);
+  msgs.push(
+    `Attempting to find an available server (${FIND_SERVER_ATTEMPTS} attempts at a ~${
+      FIND_SERVER_INTERVAL / 1000
+    }s interval [~${(
+      (FIND_SERVER_ATTEMPTS * FIND_SERVER_INTERVAL) /
+      1000 /
+      60
+    ).toFixed(0)}min timeout])...`
+  );
 
   sendMsg(channelId, msgs.join("\n"));
 
-  const socket = await findServer();
+  let socket: null | string = null;
+  for (let x = 0; x < FIND_SERVER_ATTEMPTS; x++) {
+    socket = await findServer();
+    if (socket) {
+      break;
+    } else {
+      await sleep(FIND_SERVER_INTERVAL);
+    }
+  }
 
   if (socket) {
     updateGame({
@@ -928,7 +975,7 @@ const mapVoteComplete = async (channelId: string) => {
 
     sendMsg(
       channelId,
-      `TODO: Found a server. Attempting to set the map to ${winningMap}...`
+      `Found a server (${socket}). TODO: Attempting to set the map to ${winningMap}...`
     );
 
     await setMapOnServer(socket, winningMap);
@@ -949,7 +996,7 @@ const mapVoteComplete = async (channelId: string) => {
     for (const playerId of playerIds) {
       sendDirectMsg(
         playerId,
-        `Your PUG is ready. Please join the server at: steam://connect/${game.socket}/games`
+        `Your ${game.mode} PUG is ready. Please join the server at: steam://connect/${game.socket}/games`
       );
     }
 
@@ -959,7 +1006,10 @@ const mapVoteComplete = async (channelId: string) => {
       `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
     );
   } else {
-    sendMsg(channelId, `Could not find an available server.`);
+    sendMsg(
+      channelId,
+      `Could not find an available server within the time limit.`
+    );
   }
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
