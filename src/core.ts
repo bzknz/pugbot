@@ -673,65 +673,71 @@ const startMapVote = (channelId: string) => {
     });
   }
 
-  const mapVoteTimeout = setTimeout(() => {
-    const game = getGame(channelId);
-    const players = getPlayers(game);
-    const numVotes = players.filter((p) => p.mapVote).length;
-    sendMsg(
-      channelId,
-      `${numVotes}/${players.length} players voted within the time limit.`
-    );
-    mapVoteComplete(channelId);
-  }, MAP_VOTE_TIMEOUT);
-
-  updateGame({
-    type: UPDATE_GAME,
-    payload: {
-      channelId,
-      state: GameState.MapVote,
-      mapVoteAt: Date.now(),
-      mapVoteTimeout,
-    },
-  });
-
   sendMsg(channelId, `All players are ready.`);
 
-  const game = getGame(channelId);
-  const maps = getGameModeMaps(game.mode);
+  const maps = getGameModeMaps(existingGame.mode);
 
-  const rows = [new MessageActionRow()];
+  if (maps.length === 1) {
+    // Special case for only one map (BBall)
+    mapVoteComplete(channelId);
+  } else {
+    const mapVoteTimeout = setTimeout(() => {
+      const game = getGame(channelId);
+      const players = getPlayers(game);
+      const numVotes = players.filter((p) => p.mapVote).length;
+      sendMsg(
+        channelId,
+        `${numVotes}/${players.length} players voted within the time limit.`
+      );
+      mapVoteComplete(channelId);
+    }, MAP_VOTE_TIMEOUT);
 
-  for (let x = 1; x <= maps.length; x++) {
-    let lastRow = rows[rows.length - 1];
-    if (lastRow.components.length === 5) {
-      // Need a new row
-      rows.push(new MessageActionRow());
-      lastRow = rows[rows.length - 1];
-    }
-    const mapName = maps[x - 1];
-    lastRow.addComponents(
-      new MessageButton()
-        .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
-        .setLabel(mapName)
-        .setStyle("SECONDARY")
-    );
-  }
-
-  const channel = getDiscordChannel(channelId);
-
-  const players = getPlayers(game);
-  const embed = getEmbed(
-    `Map vote starting now. Please click the map you want to play. Waiting ${
-      MAP_VOTE_TIMEOUT / 1000
-    } seconds for votes.`
-  );
-
-  if (channel?.isText()) {
-    channel.send({
-      embeds: [embed],
-      components: rows,
-      content: players.map((p) => mentionPlayer(p.id)).join(" "),
+    updateGame({
+      type: UPDATE_GAME,
+      payload: {
+        channelId,
+        state: GameState.MapVote,
+        mapVoteAt: Date.now(),
+        mapVoteTimeout,
+      },
     });
+
+    const game = getGame(channelId);
+
+    const rows = [new MessageActionRow()];
+
+    for (let x = 1; x <= maps.length; x++) {
+      let lastRow = rows[rows.length - 1];
+      if (lastRow.components.length === 5) {
+        // Need a new row
+        rows.push(new MessageActionRow());
+        lastRow = rows[rows.length - 1];
+      }
+      const mapName = maps[x - 1];
+      lastRow.addComponents(
+        new MessageButton()
+          .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
+          .setLabel(mapName)
+          .setStyle("SECONDARY")
+      );
+    }
+
+    const channel = getDiscordChannel(channelId);
+
+    const players = getPlayers(game);
+    const embed = getEmbed(
+      `Map vote starting now. Please click the map you want to play. Waiting ${
+        MAP_VOTE_TIMEOUT / 1000
+      } seconds for votes.`
+    );
+
+    if (channel?.isText()) {
+      channel.send({
+        embeds: [embed],
+        components: rows,
+        content: players.map((p) => mentionPlayer(p.id)).join(" "),
+      });
+    }
   }
 };
 
@@ -1078,25 +1084,34 @@ const FIND_SERVER_ATTEMPTS = 60;
 const FIND_SERVER_INTERVAL = 5000;
 
 const mapVoteComplete = async (channelId: string) => {
-  const voteCounts = getMapVoteCounts(channelId);
-
   const msgs = [];
-  const maxVoteCount = Math.max(...Object.values(voteCounts));
-  const withMaxVotes = Object.entries(voteCounts)
-    .filter(([_, val]) => val === maxVoteCount)
-    .map(([key, _]) => key);
-  let winningMap = withMaxVotes[0];
-  if (withMaxVotes.length > 1) {
-    // Pick a random map from the winners
+  const existingGame = getGame(channelId);
+  const maps = getGameModeMaps(existingGame.mode);
+  let winningMap = maps[0]; // Use the first map by default
+
+  if (maps.length === 1) {
     msgs.push(
-      `${withMaxVotes.join(", ")} tied with ${maxVoteCount} votes each.`
+      `:map: **Playing ${winningMap} as it's the only available map.**`
     );
-    const randIndex = Math.round(Math.random() * (withMaxVotes.length - 1));
-    winningMap = withMaxVotes[randIndex];
-    msgs.push(`:map: **${winningMap} was randomly selected as the winner.**`);
   } else {
-    msgs.push(`:map: **${winningMap} won with ${maxVoteCount} votes.**`);
+    const voteCounts = getMapVoteCounts(channelId);
+    const maxVoteCount = Math.max(...Object.values(voteCounts));
+    const withMaxVotes = Object.entries(voteCounts)
+      .filter(([_, val]) => val === maxVoteCount)
+      .map(([key, _]) => key);
+    if (withMaxVotes.length > 1) {
+      // Pick a random map from the winners
+      msgs.push(
+        `${withMaxVotes.join(", ")} tied with ${maxVoteCount} votes each.`
+      );
+      const randIndex = Math.round(Math.random() * (withMaxVotes.length - 1));
+      winningMap = withMaxVotes[randIndex];
+      msgs.push(`:map: **${winningMap} was randomly selected as the winner.**`);
+    } else {
+      msgs.push(`:map: **${winningMap} won with ${maxVoteCount} votes.**`);
+    }
   }
+
   updateGame({
     type: UPDATE_GAME,
     payload: {
@@ -1273,7 +1288,7 @@ const getUnreadyPlayerIds = (channelId: string): string[] => {
   return unreadyPlayerIds;
 };
 
-export const test = () => {
+export const test = async () => {
   process.env.TEST_MODE = "true";
 
   store.subscribe(() => {
@@ -1283,172 +1298,180 @@ export const test = () => {
 
   const testChannel1 = "test-channel-1";
   const testChannel2 = "test-channel-2";
+  const testChannel3 = "test-channel-3";
   const testMap1 = "cp_snakewater_final1";
   const testMap2 = "cp_granary_pro_rc8";
   const testMap3 = "cp_reckoner_rc6";
 
-  startGame(testChannel1); // Should send error message
-  addPlayer(testChannel1, `1`); // Should send error message
-  removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  stopGame(testChannel1); // Should send error message
+  // startGame(testChannel1); // Should send error message
+  // addPlayer(testChannel1, `1`); // Should send error message
+  // removePlayer(testChannel1, `1`); // Should send error message
+  // readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // stopGame(testChannel1); // Should send error message
 
-  setChannelGameMode(testChannel1, GameMode.Sixes);
+  // setChannelGameMode(testChannel1, GameMode.Sixes);
 
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
-  stopGame(testChannel1); // Should send error message
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // removePlayer(testChannel1, `1`); // Should send error message
+  // readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
+  // stopGame(testChannel1); // Should send error message
 
-  addPlayer(testChannel1, `1`); // Should start game
-  stopGame(testChannel1); // Should work
+  // addPlayer(testChannel1, `1`); // Should start game
+  // stopGame(testChannel1); // Should work
 
-  // Change channel type
-  setChannelGameMode(testChannel1, GameMode.BBall); // Should work
-  setChannelGameMode(testChannel1, GameMode.Sixes); // Should work
+  // // Change channel type
+  // setChannelGameMode(testChannel1, GameMode.BBall); // Should work
+  // setChannelGameMode(testChannel1, GameMode.Sixes); // Should work
 
-  stopGame(testChannel1); // Should send error message
+  // stopGame(testChannel1); // Should send error message
 
-  startGame(testChannel1);
+  // startGame(testChannel1);
 
-  startGame(testChannel1); // Should send error message
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  removePlayer(testChannel1, `1`); // Should send error message
+  // startGame(testChannel1); // Should send error message
+  // readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // removePlayer(testChannel1, `1`); // Should send error message
 
-  for (let x = 0; x < 11; x++) {
-    addPlayer(testChannel1, `${x + 1}`);
-  }
-  for (let x = 0; x < 11; x++) {
-    removePlayer(testChannel1, `${x + 1}`);
-  }
+  // for (let x = 0; x < 11; x++) {
+  //   addPlayer(testChannel1, `${x + 1}`);
+  // }
+  // for (let x = 0; x < 11; x++) {
+  //   removePlayer(testChannel1, `${x + 1}`);
+  // }
 
-  for (let x = 0; x < 12; x++) {
-    addPlayer(testChannel1, `${x + 1}`);
-  }
+  // for (let x = 0; x < 12; x++) {
+  //   addPlayer(testChannel1, `${x + 1}`);
+  // }
 
-  const s = store.getState();
-  const game = s.games[testChannel1];
+  // const s = store.getState();
+  // const game = s.games[testChannel1];
 
-  if (getPlayers(game).length !== 12) {
-    console.error("Unexpected number of players");
-    return;
-  }
-  if (game.state !== GameState.MapVote) {
-    console.error("Unexpected game state (expected MapVote)");
-    return;
-  }
+  // if (getPlayers(game).length !== 12) {
+  //   console.error("Unexpected number of players");
+  //   return;
+  // }
+  // if (game.state !== GameState.MapVote) {
+  //   console.error("Unexpected game state (expected MapVote)");
+  //   return;
+  // }
 
-  startGame(testChannel1); // Should send error message
-  addPlayer(testChannel1, `1`); // Should send error message
-  removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  stopGame(testChannel1); // Should send error message
+  // startGame(testChannel1); // Should send error message
+  // addPlayer(testChannel1, `1`); // Should send error message
+  // removePlayer(testChannel1, `1`); // Should send error message
+  // readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // stopGame(testChannel1); // Should send error message
 
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  for (let x = 0; x < 12; x++) {
-    mapVote(
-      testChannel1,
-      `${x + 1}`,
-      x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3
-    );
-  }
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // for (let x = 0; x < 12; x++) {
+  //   mapVote(
+  //     testChannel1,
+  //     `${x + 1}`,
+  //     x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3
+  //   );
+  // }
 
-  // Prev game is still processing (looking for server, setting map etc)
-  startGame(testChannel1); // Should send error message
-  addPlayer(testChannel1, `1`); // Should send error message
-  removePlayer(testChannel1, `1`); // Should send error message
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
-  mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-  stopGame(testChannel1); // Should send error message
+  // // Prev game is still processing (looking for server, setting map etc)
+  // startGame(testChannel1); // Should send error message
+  // addPlayer(testChannel1, `1`); // Should send error message
+  // removePlayer(testChannel1, `1`); // Should send error message
+  // readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR); // Should send error message
+  // mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  // stopGame(testChannel1); // Should send error message
 
-  // Get past async work in looking for server, setting map etc
-  setTimeout(() => {
-    // Start a second game
-    for (let x = 0; x < 11; x++) {
-      addPlayer(testChannel1, `${x + 1}`);
-    }
+  // // Get past async work in looking for server, setting map etc
+  // setTimeout(() => {
+  //   // Start a second game
+  //   for (let x = 0; x < 11; x++) {
+  //     addPlayer(testChannel1, `${x + 1}`);
+  //   }
 
-    // Manually set the 11 players currently added unready
-    const s = store.getState();
-    const game = s.games[testChannel1];
-    const timestamp = Date.now() - 1000; // 1 sec in the past
-    for (let x = 0; x < 11; x++) {
-      store.dispatch({
-        type: READY_PLAYER,
-        payload: {
-          channelId: game.channelId,
-          playerId: `${x + 1}`,
-          readyUntil: timestamp,
-        },
-      });
-    }
+  //   // Manually set the 11 players currently added unready
+  //   const s = store.getState();
+  //   const game = s.games[testChannel1];
+  //   const timestamp = Date.now() - 1000; // 1 sec in the past
+  //   for (let x = 0; x < 11; x++) {
+  //     store.dispatch({
+  //       type: READY_PLAYER,
+  //       payload: {
+  //         channelId: game.channelId,
+  //         playerId: `${x + 1}`,
+  //         readyUntil: timestamp,
+  //       },
+  //     });
+  //   }
 
-    // Add last player
-    addPlayer(testChannel1, `12`);
+  //   // Add last player
+  //   addPlayer(testChannel1, `12`);
 
-    startGame(testChannel1); // Should send error message
-    addPlayer(testChannel1, `12`); // Should send error message
-    mapVote(testChannel1, `invalid`, testMap1); // Should send error message
-    stopGame(testChannel1); // Should send error message
+  //   startGame(testChannel1); // Should send error message
+  //   addPlayer(testChannel1, `12`); // Should send error message
+  //   mapVote(testChannel1, `invalid`, testMap1); // Should send error message
+  //   stopGame(testChannel1); // Should send error message
 
-    readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR); // Should work
+  //   readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR); // Should work
 
-    removePlayer(testChannel1, `12`); // Should work - take back
-    if (
-      store.getState().games[testChannel1].state !== GameState.FindingServer
-    ) {
-      console.error("Unexpected game state (expected FindingServer)");
-      return;
-    }
+  //   removePlayer(testChannel1, `12`); // Should work - take back
+  //   if (
+  //     store.getState().games[testChannel1].state !== GameState.FindingServer
+  //   ) {
+  //     console.error("Unexpected game state (expected FindingServer)");
+  //     return;
+  //   }
 
-    addPlayer(testChannel1, `12`);
+  //   addPlayer(testChannel1, `12`);
 
-    for (let x = 0; x < 11; x++) {
-      readyPlayer(testChannel1, `${x + 1}`, DEFAULT_READY_FOR);
-    }
+  //   for (let x = 0; x < 11; x++) {
+  //     readyPlayer(testChannel1, `${x + 1}`, DEFAULT_READY_FOR);
+  //   }
 
-    // Check working when players do not ready up in time
-    setTimeout(() => {
-      // Start a second game
-      for (let x = 0; x < 11; x++) {
-        addPlayer(testChannel1, `${x + 1}`);
-      }
+  //   // Check working when players do not ready up in time
+  //   setTimeout(() => {
+  //     // Start a second game
+  //     for (let x = 0; x < 11; x++) {
+  //       addPlayer(testChannel1, `${x + 1}`);
+  //     }
 
-      // Manually set the 11 players currently added unready
-      const s = store.getState();
-      const game = s.games[testChannel1];
-      const timestamp = Date.now() - 1000; // 1 sec in the past
-      for (let x = 0; x < 11; x++) {
-        store.dispatch({
-          type: READY_PLAYER,
-          payload: {
-            channelId: game.channelId,
-            playerId: `${x + 1}`,
-            readyUntil: timestamp,
-          },
-        });
-      }
+  //     // Manually set the 11 players currently added unready
+  //     const s = store.getState();
+  //     const game = s.games[testChannel1];
+  //     const timestamp = Date.now() - 1000; // 1 sec in the past
+  //     for (let x = 0; x < 11; x++) {
+  //       store.dispatch({
+  //         type: READY_PLAYER,
+  //         payload: {
+  //           channelId: game.channelId,
+  //           playerId: `${x + 1}`,
+  //           readyUntil: timestamp,
+  //         },
+  //       });
+  //     }
 
-      addPlayer(testChannel1, `12`);
-    }, MAP_VOTE_TIMEOUT + 500);
+  //     addPlayer(testChannel1, `12`);
+  //   }, MAP_VOTE_TIMEOUT + 500);
 
-    // Expect players to be removed and game returned to AddRemove state
-  });
+  //   // Expect players to be removed and game returned to AddRemove state
+  // });
 
   // Test a second channel with Ultiduo
-  setChannelGameMode(testChannel2, GameMode.Ultiduo);
-  startGame(testChannel2);
-  addPlayer(testChannel2, `a`);
-  addPlayer(testChannel2, `b`);
-  addPlayer(testChannel2, `c`);
-  addPlayer(testChannel2, `d`);
-  mapVote(testChannel2, `a`, "koth_ultiduo_r_b7");
-  mapVote(testChannel2, `b`, "koth_ultiduo_r_b7");
-  mapVote(testChannel2, `c`, "koth_ultiduo_r_b7");
-  mapVote(testChannel2, `d`, "koth_ultiduo_r_b7");
+  console.log(setChannelGameMode(testChannel2, GameMode.Ultiduo));
+  console.log(startGame(testChannel2));
+  console.log(addPlayer(testChannel2, `a`));
+  console.log(addPlayer(testChannel2, `b`));
+  console.log(addPlayer(testChannel2, `c`));
+  console.log(addPlayer(testChannel2, `d`));
+  console.log(mapVote(testChannel2, `a`, "koth_ultiduo_r_b7"));
+  console.log(mapVote(testChannel2, `b`, "koth_ultiduo_r_b7"));
+  console.log(mapVote(testChannel2, `c`, "koth_ultiduo_r_b7"));
+  console.log(mapVote(testChannel2, `d`, "ultiduo_baloo_v2"));
+
+  console.log(setChannelGameMode(testChannel3, GameMode.BBall));
+  console.log(startGame(testChannel3));
+  console.log(addPlayer(testChannel3, `a`));
+  console.log(addPlayer(testChannel3, `b`));
+  console.log(addPlayer(testChannel3, `c`));
+  console.log(addPlayer(testChannel3, `d`));
 };
 
 export enum Commands {
