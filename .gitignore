@@ -1,7 +1,7 @@
 node_modules
 *~
-data
-!data/maps.json
+data/channels
+data/games
 todo.txt
 .vscode
 dist

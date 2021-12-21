@@ -1,0 +1,29 @@
+{
+  "BBALL": ["ctf_ballin_sky"],
+  "HIGHLANDER": ["koth_product_rcx", "pl_borneo", "pl_upward"],
+  "SIXES": [
+    "cp_granary_pro_rc8",
+    "cp_gullywash_f3",
+    "cp_metalworks",
+    "cp_process_f9a",
+    "cp_prolands_rc2p",
+    "cp_reckoner_rc6",
+    "cp_snakewater_final1",
+    "cp_sunshine",
+    "koth_clearcut_b15d",
+    "koth_product_rcx"
+  ],
+  "ULTIDUO": ["koth_ultiduo_r_b7", "ultiduo_baloo_v2"],
+  "TEST": [
+    "cp_granary_pro_rc8",
+    "cp_gullywash_f3",
+    "cp_metalworks",
+    "cp_process_f9a",
+    "cp_prolands_rc2p",
+    "cp_reckoner_rc6",
+    "cp_snakewater_final1",
+    "cp_sunshine",
+    "koth_clearcut_b15d",
+    "koth_product_rcx"
+  ]
+}
