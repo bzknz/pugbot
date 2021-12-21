@@ -143,7 +143,7 @@ const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
 const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
 const MIN_READY_FOR = 1000 * 60 * 5;
 const READY_TIMEOUT = 1000 * 30; // 30 seconds
-const MAP_VOTE_TIMEOUT = 1000 * 15; // 15 seconds
+const MAP_VOTE_TIMEOUT = 1000 * 30; // 15 seconds
 
 const gameModeToNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
@@ -593,8 +593,46 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
   return msgs;
 };
 
+const removePlayers = (channelId: string, playerIds: string[]) => {
+  store.dispatch({ type: REMOVE_PLAYERS, payload: { channelId, playerIds } });
+  sendMsg(
+    channelId,
+    `Removed players from this game as they are in another game that is about to start.\n${getStatus(
+      channelId
+    )}`,
+    playerIds.map((p) => mentionPlayer(p)).join(" ")
+  );
+};
+
+const removePlayersFromOtherGames = (channelId: string) => {
+  // Remove players from other games
+  const game = getGame(channelId);
+  const state = store.getState();
+  const otherGames = Object.values(state.games).filter(
+    (g) => g.channelId !== channelId
+  );
+  const players = getPlayers(game);
+
+  if (otherGames.length > 0) {
+    for (const otherGame of otherGames) {
+      const playersIdsToRemove = [];
+      for (const player of players) {
+        const otherGamePlayersIds = getPlayers(otherGame).map((p) => p.id);
+        if (otherGamePlayersIds.includes(player.id)) {
+          playersIdsToRemove.push(player.id);
+        }
+      }
+      if (playersIdsToRemove.length > 0) {
+        removePlayers(otherGame.channelId, playersIdsToRemove);
+      }
+    }
+  }
+};
+
 const startMapVote = (channelId: string) => {
   // All players are now ready - start map vote
+  removePlayersFromOtherGames(channelId);
+
   const existingGame = getGame(channelId);
   if (existingGame.readyTimeout) {
     clearTimeout(existingGame.readyTimeout);
