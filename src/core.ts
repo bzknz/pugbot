@@ -344,6 +344,13 @@ const sendMsg = async (
   }
 };
 
+const sendDirectMsg = (playerId: string, msg: string) => {
+  const user = client.users.cache.get(playerId);
+  if (user) {
+    user.send(msg);
+  }
+};
+
 const BASE_PATH = `${__dirname}/../data`;
 const GAMES_PATH = `${BASE_PATH}/games`;
 const CHANNELS_PATH = `${BASE_PATH}/channels`;
@@ -833,16 +840,22 @@ const readyPlayer = (
   return msgs;
 };
 
-const findServer = async (): Promise<string> => {
-  // TODO: Find a server with no players on it from ser of available servers
-  return "-";
+const findServer = async (): Promise<string | null> => {
+  // TODO: Find a server with no players on it from set of available servers
+  // TODO: Timeout on finding a server (failure)
+  const sockets = process.env.TF2_SERVERS?.split(",");
+  if (sockets) {
+    return sockets[0];
+  } else {
+    return null;
+  }
 };
 
 const setMapOnServer = async (socket: string, map: string) => {
   // TODO: Send rcon command to change the map on the server
 };
 
-const kickPlayersFromServer = (socket: string) => {
+const vacate = (socket: string) => {
   // TODO: Send rcon command to kick players from the server
 };
 
@@ -901,44 +914,56 @@ const mapVoteComplete = async (channelId: string) => {
   sendMsg(channelId, msgs.join("\n"));
 
   const socket = await findServer();
-  // TODO: Timeout on finding a server (failure)
 
-  updateGame({
-    type: UPDATE_GAME,
-    payload: {
+  if (socket) {
+    updateGame({
+      type: UPDATE_GAME,
+      payload: {
+        channelId,
+        state: GameState.SettingMap,
+        socket,
+        settingMapAt: Date.now(),
+      },
+    });
+
+    sendMsg(
       channelId,
-      state: GameState.SettingMap,
-      socket,
-      settingMapAt: Date.now(),
-    },
-  });
+      `TODO: Found a server. Attempting to set the map to ${winningMap}...`
+    );
 
-  sendMsg(
-    channelId,
-    `TODO: Found a server. Attempting to set the map to ${winningMap}...`
-  );
+    await setMapOnServer(socket, winningMap);
+    // TODO: Timeout on finding setting the map on the server
 
-  await setMapOnServer(socket, winningMap);
-  // TODO: Timeout on finding setting the map on the server
+    updateGame({
+      type: UPDATE_GAME,
+      payload: {
+        channelId,
+        state: GameState.PlayersConnect,
+        playersConnectAt: Date.now(),
+      },
+    });
 
-  updateGame({
-    type: UPDATE_GAME,
-    payload: {
+    const game = getGame(channelId);
+    const playerIds = getPlayers(game).map((p) => p.id);
+
+    for (const playerId of playerIds) {
+      sendDirectMsg(
+        playerId,
+        `Your PUG is ready. Please join the server at: steam://connect/${game.socket}/games`
+      );
+    }
+
+    sendMsg(
       channelId,
-      state: GameState.PlayersConnect,
-      playersConnectAt: Date.now(),
-    },
-  });
-
-  const game = getGame(channelId);
-  const playerIds = getPlayers(game).map((p) => p.id);
-  sendMsg(
-    channelId,
-    `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
-    `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
-  );
+      `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
+      `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
+    );
+  } else {
+    sendMsg(channelId, `Could not find an available server.`);
+  }
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
+  const game = getGame(channelId);
   const path = `${GAMES_PATH}/${Date.now()}.json`;
   fs.writeFileSync(path, JSON.stringify(game, null, 2), "utf-8");
 
