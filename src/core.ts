@@ -911,8 +911,68 @@ const findAvailableServer = async (): Promise<string | null> => {
 
 const RCON_TIMEOUT = 5000;
 
-const setMapOnServer = async (socket: string, map: string) => {
-  // TODO: Send rcon command to change the map on the server
+const setMapOnServer = async (socket: string, map: string): Promise<string> => {
+  // Send rcon command to change the map on the server
+  if (getIsTestMode()) {
+    console.log("Not setting map on server as we are in test mode.");
+    return "Not setting map on server as we are in test mode.";
+  }
+
+  const { ip, port } = splitSocket(socket);
+  const password = process.env.RCON_PASSWORD;
+  const conn = new Rcon(ip, port, password);
+
+  const setMapPromise: Promise<string> = new Promise((resolve) => {
+    const msgs: (null | string)[] = [];
+
+    const resolveHandler = () => {
+      const toResolve = msgs.filter((m) => m).join("\n");
+      resolve(
+        toResolve ? toResolve : "Looks like the map was changed successfully."
+      );
+    };
+
+    conn
+      .on("auth", () => {
+        console.log("Authenticated");
+        const command = `changelevel ${map}`;
+        console.log(command);
+        conn.send(command);
+      })
+      .on("response", (str: string) => {
+        const msg = str ? "Response:\n```" + str + "```" : null;
+        console.log(msg);
+        msgs.push(msg);
+        if (msgs.length == 2) {
+          // Auth and response from kick command
+          resolveHandler();
+        }
+      })
+      .on("error", (err: string) => {
+        const msg =
+          "Error:\n```" + `${err ? err : "No error message."}` + "```";
+        console.log(msg);
+        msgs.push(msg);
+        resolveHandler();
+      })
+      .on("end", () => {
+        const msg = "Connection closed.";
+        console.log(msg);
+        msgs.push(msg);
+        resolveHandler();
+      });
+  });
+
+  conn.connect();
+
+  const timeoutPromise: Promise<string> = new Promise((resolve) => {
+    sleep(RCON_TIMEOUT).then(() => {
+      resolve("Error: Timed out.");
+    });
+  });
+
+  const msg = await Promise.any([setMapPromise, timeoutPromise]);
+  return msg;
 };
 
 const vacate = async (socket: string): Promise<string> => {
@@ -935,7 +995,7 @@ const vacate = async (socket: string): Promise<string> => {
       resolve(
         toResolve
           ? toResolve
-          : "Something happened but there was no response message."
+          : "Looks like no players were kicked as no players were on the server."
       );
     };
 
@@ -1070,11 +1130,12 @@ const mapVoteComplete = async (channelId: string) => {
 
     sendMsg(
       channelId,
-      `Found a server (${socket}). TODO: Attempting to set the map to ${winningMap}...`
+      `:handshake: Found a server (${socket}). Attempting to set the map to **${winningMap}**...`
     );
 
-    await setMapOnServer(socket, winningMap);
-    // TODO: Timeout on finding setting the map on the server
+    const setMapStatus = await setMapOnServer(socket, winningMap);
+
+    sendMsg(channelId, setMapStatus);
 
     updateGame({
       type: UPDATE_GAME,
