@@ -327,6 +327,8 @@ const reducer = (
 
 const store = createStore(reducer);
 
+const getIsTestMode = () => process.env.TEST_MODE === "true";
+
 const getDiscordChannel = (channelId: string) =>
   client.channels.cache.get(channelId);
 
@@ -335,6 +337,10 @@ const sendMsg = async (
   embedText: string,
   mainText?: string
 ) => {
+  if (getIsTestMode()) {
+    console.log(channelId, embedText, mainText);
+    return;
+  }
   // Send message on Discord
   // console.log(`${channelId}: ${embedText}`);
   const channel = getDiscordChannel(channelId);
@@ -911,6 +917,12 @@ const setMapOnServer = async (socket: string, map: string) => {
 
 const vacate = async (socket: string): Promise<string> => {
   // Send rcon command to kick players from the server
+
+  if (getIsTestMode()) {
+    console.log("Not vacating as we are in test mode.");
+    return "Not vacating as we are in test mode.";
+  }
+
   const { ip, port } = splitSocket(socket);
   const password = process.env.RCON_PASSWORD;
   const conn = new Rcon(ip, port, password);
@@ -1186,6 +1198,8 @@ const getUnreadyPlayerIds = (channelId: string): string[] => {
 };
 
 export const test = () => {
+  process.env.TEST_MODE = "true";
+
   store.subscribe(() => {
     const s = store.getState();
     // console.log(JSON.stringify(s) + "\n");
@@ -1307,8 +1321,10 @@ export const test = () => {
     readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR); // Should work
 
     removePlayer(testChannel1, `12`); // Should work - take back
-    if (store.getState().games[testChannel1].state !== GameState.AddRemove) {
-      console.error("Unexpected game state (expected AddRemove)");
+    if (
+      store.getState().games[testChannel1].state !== GameState.FindingServer
+    ) {
+      console.error("Unexpected game state (expected FindingServer)");
       return;
     }
 
