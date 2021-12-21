@@ -4,6 +4,7 @@ import Discord, {
   MessageButton,
   MessageEmbed,
   MessageOptions,
+  Permissions,
 } from "discord.js";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -746,6 +747,10 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
   return msgs;
 };
 
+const kickPlayer = (channelId: string, playerId: string) => {
+  return removePlayer(channelId, playerId);
+};
+
 const getStatus = (channelId: string): string => {
   const channel = getChannel(channelId);
   if (!channel) {
@@ -1195,6 +1200,7 @@ export enum Commands {
   Status = "status",
   Add = "add",
   Remove = "remove",
+  Kick = "kick",
   Ready = "ready",
   MapVote = "vote-map",
   Stop = "stop",
@@ -1208,6 +1214,18 @@ const handleMultiResponse = (
 ) => {
   const msg = msgs.join(`\n`);
   interaction.reply({ embeds: [getEmbed(msg)] });
+};
+
+const NO_PERMISSION_MSG = "You do not have permission to do this.";
+
+const hasPermission = (
+  permissions: string | Readonly<Discord.Permissions>,
+  permission: Discord.PermissionResolvable
+): boolean => {
+  if (typeof permissions !== "string" && permissions.has(permission)) {
+    return true;
+  }
+  return false;
 };
 
 export const run = () => {
@@ -1228,15 +1246,29 @@ export const run = () => {
     const { commandName, channelId, user } = interaction;
     const playerId = user.id;
 
+    const playerPermissions = interaction.member.permissions;
+
     switch (commandName) {
       case Commands.Ping: {
         interaction.reply({ ephemeral: true, embeds: [getEmbed("Pong!")] });
         break;
       }
       case Commands.Setup: {
-        const mode = interaction.options.getString("mode") as GameMode;
-        const msg = setChannelGameMode(channelId, mode);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        if (
+          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
+        ) {
+          const mode = interaction.options.getString("mode") as GameMode;
+          const msg = setChannelGameMode(channelId, mode);
+          interaction.reply({ embeds: [getEmbed(msg)] });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`
+              ),
+            ],
+          });
+        }
         break;
       }
       case Commands.Start: {
@@ -1250,8 +1282,20 @@ export const run = () => {
         break;
       }
       case Commands.Stop: {
-        const msg = stopGame(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        if (
+          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_MESSAGES)
+        ) {
+          const msg = stopGame(channelId);
+          interaction.reply({ embeds: [getEmbed(msg)] });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_MESSAGES permission.`
+              ),
+            ],
+          });
+        }
         break;
       }
       case Commands.Add: {
@@ -1262,6 +1306,28 @@ export const run = () => {
       case Commands.Remove: {
         const msgs = removePlayer(channelId, playerId);
         handleMultiResponse(interaction, msgs);
+        break;
+      }
+      case Commands.Kick: {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.KICK_MEMBERS)) {
+          const targetPlayer = interaction.options.getUser("user");
+          if (targetPlayer) {
+            const msgs = kickPlayer(channelId, targetPlayer.id);
+            handleMultiResponse(interaction, msgs);
+          } else {
+            interaction.reply({
+              embeds: [getEmbed(`Could not find player to kick.`)],
+            });
+          }
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the KICK_MEMBERS permission.`
+              ),
+            ],
+          });
+        }
         break;
       }
       case Commands.Ready: {

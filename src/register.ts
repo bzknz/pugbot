@@ -42,6 +42,15 @@ const run = async () => {
       .setName(Commands.Remove)
       .setDescription("Removes from the PUG"),
     new SlashCommandBuilder()
+      .setName(Commands.Kick)
+      .setDescription("Kicks a player from the PUG")
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setRequired(true)
+          .setDescription("The player to be kicked")
+      ),
+    new SlashCommandBuilder()
       .setName(Commands.Ready)
       .setDescription("Readies up")
       .addNumberOption((option) =>
