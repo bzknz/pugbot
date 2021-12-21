@@ -906,7 +906,7 @@ const findAvailableServer = async (): Promise<string | null> => {
 const RCON_TIMEOUT = 5000;
 
 const setMapOnServer = async (socket: string, map: string) => {
-  // Send rcon command to change the map on the server
+  // TODO: Send rcon command to change the map on the server
 };
 
 const vacate = async (socket: string): Promise<string> => {
@@ -917,6 +917,16 @@ const vacate = async (socket: string): Promise<string> => {
 
   const vacatePromise: Promise<string> = new Promise((resolve) => {
     const msgs: (null | string)[] = [];
+
+    const resolveHandler = () => {
+      const toResolve = msgs.filter((m) => m).join("\n");
+      resolve(
+        toResolve
+          ? toResolve
+          : "Something happened but there was no response message."
+      );
+    };
+
     conn
       .on("auth", () => {
         console.log("Authenticated");
@@ -929,20 +939,20 @@ const vacate = async (socket: string): Promise<string> => {
         msgs.push(msg);
         if (msgs.length == 2) {
           // Auth and response from kick command
-          resolve(msgs.filter((m) => m).join("\n"));
+          resolveHandler();
         }
       })
       .on("error", (err: string) => {
         const msg = "Error:\n```" + `${err ? err : "No error message"}` + "```";
         console.log(msg);
         msgs.push(msg);
-        resolve(msgs.filter((m) => m).join("\n"));
+        resolveHandler();
       })
       .on("end", () => {
         const msg = "Connection closed.";
         console.log(msg);
         msgs.push(msg);
-        resolve(msgs.filter((m) => m).join("\n"));
+        resolveHandler();
       });
   });
 
