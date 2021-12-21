@@ -355,7 +355,7 @@ const sendMsg = async (
   }
 };
 
-const sendDirectMsg = (playerId: string, msg: string) => {
+const sendDM = (playerId: string, msg: string) => {
   const user = client.users.cache.get(playerId);
   if (user) {
     user.send(msg);
@@ -550,6 +550,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
     if (unreadyPlayerIds.length === 0) {
       startMapVote(channelId);
     } else {
+      // Setup timeout if not all players ready up in time.
       const readyTimeout = setTimeout(() => {
         // If this runs, remove the unready players
         const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
@@ -588,7 +589,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       const row = new MessageActionRow().addComponents(
         new MessageButton()
           .setCustomId(READY_BUTTON)
-          .setLabel("Ready up")
+          .setLabel("Ready up!")
           .setStyle("SUCCESS")
       );
 
@@ -597,15 +598,26 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       const embed = getEmbed(
         `${unreadyPlayerIds.length} player(s) are not ready. Waiting ${
           READY_TIMEOUT / 1000
-        } seconds for them. Click the button (or use the slash command) to ready up.`
+        } seconds for them. Click the button (or use \`/ready\`) to ready up.`
       );
 
       if (channel?.isText()) {
-        channel.send({
-          embeds: [embed],
-          components: [row],
-          content: `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`,
-        });
+        channel
+          .send({
+            embeds: [embed],
+            components: [row],
+            content: `${unreadyPlayerIds
+              .map((p) => mentionPlayer(p))
+              .join(" ")}`,
+          })
+          .then((embed) => {
+            for (const unreadyPlayerId of unreadyPlayerIds) {
+              sendDM(
+                unreadyPlayerId,
+                `Your PUG is full. Please ready up: ${embed.url}`
+              );
+            }
+          });
       }
     }
   }
@@ -665,7 +677,10 @@ const startMapVote = (channelId: string) => {
     const game = getGame(channelId);
     const players = getPlayers(game);
     const numVotes = players.filter((p) => p.mapVote).length;
-    sendMsg(channelId, `${numVotes}/${players.length} players voted.`);
+    sendMsg(
+      channelId,
+      `${numVotes}/${players.length} players voted within the time limit.`
+    );
     mapVoteComplete(channelId);
   }, MAP_VOTE_TIMEOUT);
 
@@ -1102,7 +1117,7 @@ const mapVoteComplete = async (channelId: string) => {
       60
     ).toFixed(
       0
-    )}min timeout])... An admin can /vacate to kick all players from a server.`
+    )}min timeout])... An admin can \`/vacate\` to kick all players from a server.`
   );
 
   sendMsg(channelId, msgs.join("\n"));
@@ -1150,7 +1165,7 @@ const mapVoteComplete = async (channelId: string) => {
     const playerIds = getPlayers(game).map((p) => p.id);
 
     for (const playerId of playerIds) {
-      sendDirectMsg(
+      sendDM(
         playerId,
         `Your ${game.mode} PUG is ready. Please join the server at: steam://connect/${game.socket}/games`
       );
