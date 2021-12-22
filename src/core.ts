@@ -1263,7 +1263,7 @@ const mapVote = (
   });
 
   // Notify users about player vote
-  const msg = `${mentionPlayer(playerId)} voted for ${mapVote}.`;
+  const msg = `You voted for ${mapVote}.`;
 
   const game = getGame(channelId);
 
