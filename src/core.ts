@@ -1550,6 +1550,7 @@ export const run = () => {
                 `${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`
               ),
             ],
+            ephemeral: true,
           });
         }
         break;
@@ -1575,6 +1576,7 @@ export const run = () => {
                 `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
               ),
             ],
+            ephemeral: true,
           });
         }
         break;
@@ -1607,6 +1609,7 @@ export const run = () => {
                 `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
               ),
             ],
+            ephemeral: true,
           });
         }
         break;
@@ -1655,6 +1658,7 @@ export const run = () => {
                 `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
               ),
             ],
+            ephemeral: true,
           });
         }
         break;
@@ -1685,12 +1689,13 @@ export const run = () => {
         const msg = await vacate(socket);
         interaction.editReply({ content: msg });
       } else {
-        interaction.editReply({
+        interaction.reply({
           embeds: [
             getEmbed(
               `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
             ),
           ],
+          ephemeral: true,
         });
       }
     }
