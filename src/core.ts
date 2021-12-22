@@ -1456,6 +1456,13 @@ export const test = async () => {
     );
   }
 
+  // Check the winning map one of the three test maps
+  const compareMapsTo = [testMap1, testMap2, testMap3] as string[];
+  assert(store.getState().games[testChannel1].map !== null);
+  assert(
+    compareMapsTo.includes(store.getState().games[testChannel1].map as string)
+  );
+
   // Prev game is still processing (looking for server, setting map etc)
   startGame(testChannel1); // Should send error message
   addPlayer(testChannel1, `1`); // Should send error message
@@ -1546,9 +1553,13 @@ export const test = async () => {
   console.log(addPlayer(testChannel2, `c`));
   console.log(addPlayer(testChannel2, `d`));
   console.log(mapVote(testChannel2, `a`, "koth_ultiduo_r_b7"));
-  console.log(mapVote(testChannel2, `b`, "koth_ultiduo_r_b7"));
-  console.log(mapVote(testChannel2, `c`, "koth_ultiduo_r_b7"));
+  console.log(mapVote(testChannel2, `b`, "ultiduo_baloo_v2"));
+  console.log(mapVote(testChannel2, `c`, "ultiduo_baloo_v2"));
   console.log(mapVote(testChannel2, `d`, "ultiduo_baloo_v2"));
+
+  // Check the winning map is ultiduo_baloo_v2
+  assert(store.getState().games[testChannel2].map === "ultiduo_baloo_v2");
+
   // Currently looking for an available server
 
   console.log(setChannelGameMode(testChannel3, GameMode.BBall));
