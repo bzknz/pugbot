@@ -1723,7 +1723,7 @@ export const run = () => {
         const minutesIn = interaction.options.getNumber("minutes");
         const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
         const msg = readyPlayer(channelId, playerId, readyFor);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
         break;
       }
       case Commands.Vacate: {
