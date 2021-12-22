@@ -151,8 +151,8 @@ type Action =
 const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
 const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
 const MIN_READY_FOR = 1000 * 60 * 5;
-const READY_TIMEOUT = 1000 * 30; // 30 seconds
-const MAP_VOTE_TIMEOUT = 1000 * 30; // 15 seconds
+const READY_TIMEOUT = 1000 * 45; // 45 seconds
+const MAP_VOTE_TIMEOUT = 1000 * 45; // 45 seconds
 
 const gameModeToNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
