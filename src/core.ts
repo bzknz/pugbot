@@ -866,11 +866,9 @@ const readyPlayer = (
   });
 
   const readyUntilDate = new Date(readyUntil);
-  const msgs = `${mentionPlayer(
-    playerId
-  )} is ready until ${readyUntilDate.toLocaleTimeString("en-ZA")}.\n${getStatus(
-    channelId
-  )}`;
+  const msgs = `${mentionPlayer(playerId)} is ready for ${Math.round(
+    time / 1000 / 60
+  )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
 
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const game = getGame(channelId);
@@ -1411,13 +1409,19 @@ export const test = async () => {
   assert.deepEqual(kickPlayer(testChannel1, `1`), [
     `<@1> is not added. Ignoring.`,
   ]);
-
-  // Ready player
-  readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR);
+  assert(
+    readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
+      "<@1> is not added. Ignoring."
+  );
 
   for (let x = 0; x < 11; x++) {
     addPlayer(testChannel1, `${x + 1}`);
   }
+
+  // Ready player 11
+  const readyMsg = readyPlayer(testChannel1, "11", DEFAULT_READY_FOR);
+  console.log(readyMsg);
+  assert(readyMsg.includes("<@11> is ready for 10min (until "));
 
   // Try add player again
   assert.deepEqual(addPlayer(testChannel1, `1`), [
