@@ -151,8 +151,8 @@ type Action =
 const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
 const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
 const MIN_READY_FOR = 1000 * 60 * 5;
-const READY_TIMEOUT = 1000 * 45; // 45 seconds
-const MAP_VOTE_TIMEOUT = 1000 * 45; // 45 seconds
+let READY_TIMEOUT = 1000 * 45; // 45 seconds
+let MAP_VOTE_TIMEOUT = 1000 * 45; // 45 seconds
 
 const gameModeToNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
@@ -1320,6 +1320,10 @@ const listMaps = (channelId: string): string => {
 
 export const test = async () => {
   process.env.TEST_MODE = "true";
+
+  // Manually set timeouts to low values
+  READY_TIMEOUT = 1000 * 1; // 1 second
+  MAP_VOTE_TIMEOUT = 1000 * 1; // 1 second
 
   store.subscribe(() => {
     const s = store.getState();
