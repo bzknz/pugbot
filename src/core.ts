@@ -927,6 +927,13 @@ const getServerDetails = async (
 
 const findAvailableServer = async (): Promise<string | null> => {
   // Find a server with no players on it from set of available servers
+
+  if (getIsTestMode()) {
+    console.log("Not attempting to find a server as we are in test mode.");
+    await sleep(500);
+    return "no-server";
+  }
+
   const sockets = getEnvSockets();
 
   if (sockets) {
@@ -946,6 +953,7 @@ const setMapOnServer = async (socket: string, map: string): Promise<string> => {
   // Send rcon command to change the map on the server
   if (getIsTestMode()) {
     console.log("Not setting map on server as we are in test mode.");
+    await sleep(500);
     return "Not setting map on server as we are in test mode.";
   }
 
@@ -1118,6 +1126,7 @@ const mapVoteComplete = async (channelId: string) => {
       winningMap = withMaxVotes[randIndex];
       msgs.push(`:map: **${winningMap} was randomly selected as the winner.**`);
     } else {
+      winningMap = withMaxVotes[0]; // Only one in the set of winning maps
       msgs.push(`:map: **${winningMap} won with ${maxVoteCount} votes.**`);
     }
   }
