@@ -1217,16 +1217,16 @@ const mapVoteComplete = async (channelId: string) => {
     );
   }
 
+  // Set timers to null if they are set (can't stringify)
+  updateGame({
+    type: UPDATE_GAME,
+    payload: { channelId, readyTimeout: null, mapVoteTimeout: null },
+  });
+
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
   const game = getGame(channelId);
   const path = `${GAMES_PATH}/${Date.now()}.json`;
-  // Set timers to null if they are set (can't stringify)
-  if (game.readyTimeout) {
-    game.readyTimeout = null;
-  }
-  if (game.mapVoteTimeout) {
-    game.mapVoteTimeout = null;
-  }
+
   const stringified = JSON.stringify(game, null, 2);
   fs.writeFileSync(path, stringified, "utf-8");
 
