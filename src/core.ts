@@ -1723,7 +1723,7 @@ export const run = () => {
         const minutesIn = interaction.options.getNumber("minutes");
         const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
         const msg = readyPlayer(channelId, playerId, readyFor);
-        interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
+        interaction.reply({ embeds: [getEmbed(msg)] });
         break;
       }
       case Commands.Vacate: {
@@ -1786,7 +1786,7 @@ export const run = () => {
       interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
     } else if (customId === READY_BUTTON) {
       const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
-      interaction.reply({ embeds: [getEmbed(msg)] });
+      interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
       if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
