@@ -36,6 +36,11 @@ const run = async () => {
       .setName(Commands.Status)
       .setDescription("Get status of current PUG"),
     new SlashCommandBuilder()
+      .setName(Commands.Maps)
+      .setDescription(
+        "List all maps available for the game mode of the channel"
+      ),
+    new SlashCommandBuilder()
       .setName(Commands.Add)
       .setDescription("Adds to the PUG"),
     new SlashCommandBuilder()
