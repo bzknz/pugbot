@@ -1,6 +1,12 @@
 {
   "BBALL": ["ctf_ballin_sky"],
-  "HIGHLANDER": ["koth_product_rcx", "pl_borneo", "pl_upward"],
+  "HIGHLANDER": [
+    "pl_borneo",
+    "pl_badwater",
+    "pl_upward",
+    "cp_steel",
+    "koth_lakeside_final"
+  ],
   "SIXES": [
     "cp_granary_pro_rc8",
     "cp_gullywash_f3",
