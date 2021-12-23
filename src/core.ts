@@ -579,9 +579,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
 
         sendMsg(
           channelId,
-          `Removed ${unreadyPlayerIds.length} unready player(s).\n${getStatus(
-            channelId
-          )}`,
+          `:slight_frown: Removed ${
+            unreadyPlayerIds.length
+          } unready player(s).\n${getStatus(channelId)}`,
           `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
         );
       }, READY_TIMEOUT);
