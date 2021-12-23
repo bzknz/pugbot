@@ -546,7 +546,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
     payload: { channelId, player },
   });
 
-  const msgs = [`Added ${mentionPlayer(playerId)}.`, getStatus(channelId)];
+  const msgs = [`Added: ${mentionPlayer(playerId)}`, getStatus(channelId)];
 
   if (nextNumPlayers === totalPlayers) {
     updateGame({
@@ -581,7 +581,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
           channelId,
           `:slight_frown: Removed ${
             unreadyPlayerIds.length
-          } unready player(s).\n${getStatus(channelId)}`,
+          } unready player(s) as they did not ready up in time.\n${getStatus(
+            channelId
+          )}`,
           `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
         );
       }, READY_TIMEOUT);
@@ -606,7 +608,9 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       const channel = getDiscordChannel(channelId);
 
       const embed = getEmbed(
-        `${unreadyPlayerIds.length} player(s) are not ready. Waiting ${
+        `:hourglass: ${
+          unreadyPlayerIds.length
+        } player(s) are not ready. Waiting ${
           READY_TIMEOUT / 1000
         } seconds for them. Click the button (or use \`/ready\`) to ready up.`
       );
@@ -638,7 +642,7 @@ const removePlayers = (channelId: string, playerIds: string[]) => {
   store.dispatch({ type: REMOVE_PLAYERS, payload: { channelId, playerIds } });
   sendMsg(
     channelId,
-    `Removed players from this game as they are in another game that is about to start.\n${getStatus(
+    `:warning: Removed players from this game as they are in another game that is about to start.\n${getStatus(
       channelId
     )}`,
     playerIds.map((p) => mentionPlayer(p)).join(" ")
@@ -736,7 +740,7 @@ const startMapVote = (channelId: string) => {
 
     const players = getPlayers(game);
     const embed = getEmbed(
-      `Map vote starting now. Please click the map you want to play. Waiting ${
+      `:ballot_box: Map vote starting now. Please click the map you want to play. Waiting ${
         MAP_VOTE_TIMEOUT / 1000
       } seconds for votes.`
     );
@@ -791,7 +795,7 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
     msgs.push(`Cancelling ready check.`);
   }
 
-  msgs.push(`Removed ${mentionPlayer(playerId)}.`);
+  msgs.push(`Removed: ${mentionPlayer(playerId)}`);
   msgs.push(getStatus(channelId));
   return msgs;
 };
@@ -816,7 +820,7 @@ const getStatus = (channelId: string): string => {
   const numPlayers = players.length;
   const totalPlayers = gameModeToNumPlayers(game.mode);
 
-  let out = `Players (${numPlayers}/${totalPlayers}): `;
+  let out = `Status (${numPlayers}/${totalPlayers}): `;
   if (players.length === 0) {
     out += "Empty";
   } else {
@@ -969,7 +973,9 @@ const setMapOnServer = async (socket: string, map: string): Promise<string> => {
     const resolveHandler = () => {
       const toResolve = msgs.filter((m) => m).join("\n");
       resolve(
-        toResolve ? toResolve : "Looks like the map was changed successfully."
+        toResolve
+          ? toResolve
+          : ":white_check_mark: Looks like the map was changed successfully."
       );
     };
 
@@ -981,7 +987,7 @@ const setMapOnServer = async (socket: string, map: string): Promise<string> => {
         conn.send(command);
       })
       .on("response", (str: string) => {
-        const msg = str ? "Response:\n```" + str + "```" : null;
+        const msg = str ? "Set map response:\n```" + str + "```" : null;
         console.log(msg);
         msgs.push(msg);
         if (msgs.length == 2) {
@@ -1047,7 +1053,7 @@ const vacate = async (socket: string): Promise<string> => {
         conn.send("kickall");
       })
       .on("response", (str: string) => {
-        const msg = str ? "Response:\n```" + str + "```" : null;
+        const msg = str ? "Vacate response:\n```" + str + "```" : null;
         console.log(msg);
         msgs.push(msg);
         if (msgs.length == 2) {
@@ -1374,8 +1380,8 @@ export const test = async () => {
   assert.deepEqual(addPlayer(testChannel1, `1`), [
     STARTING_FROM_ADD,
     NEW_GAME_STARTED,
-    `Added <@1>.`,
-    `Players (1/12): <@1>:ballot_box_with_check: `,
+    `Added: <@1>`,
+    `Status (1/12): <@1>:ballot_box_with_check: `,
   ]);
 
   // Stop the game
@@ -1406,7 +1412,7 @@ export const test = async () => {
   assert(startGame(testChannel1) === NEW_GAME_STARTED);
 
   // Empty game status
-  assert(getStatus(testChannel1) === "Players (0/12): Empty");
+  assert(getStatus(testChannel1) === "Status (0/12): Empty");
 
   // Test invalid commands right after new game started
   assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
@@ -1425,10 +1431,10 @@ export const test = async () => {
       "<@1> is not added. Ignoring."
   );
 
-  // Add 11 players (not full)
+  // Add 11 Status (not full)
   for (let x = 0; x < 11; x++) {
     assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added <@${x + 1}>.`,
+      `Added: <@${x + 1}>`,
       getStatus(testChannel1),
     ]);
     await sleep(10); // Get a different timestamp for each player
@@ -1437,7 +1443,7 @@ export const test = async () => {
   // Check status
   assert(
     getStatus(testChannel1) ===
-      "Players (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: "
+      "Status (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: "
   );
 
   // Ready player 11
@@ -1462,7 +1468,7 @@ export const test = async () => {
   // Remove all 11 players
   for (let x = 0; x < 11; x++) {
     assert.deepEqual(removePlayer(testChannel1, `${x + 1}`), [
-      `Removed <@${x + 1}>.`,
+      `Removed: <@${x + 1}>`,
       getStatus(testChannel1),
     ]);
   }
@@ -1470,7 +1476,7 @@ export const test = async () => {
   // Add all players to fill game
   for (let x = 0; x < 12; x++) {
     assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added <@${x + 1}>.`,
+      `Added: <@${x + 1}>`,
       getStatus(testChannel1),
     ]);
     await sleep(10); // Get a different timestamp for each player
