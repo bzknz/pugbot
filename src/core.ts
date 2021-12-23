@@ -58,7 +58,7 @@ type Game = {
   map: null | string;
   findingServerAt: null | number;
   settingMapAt: null | number;
-  socket: null | string;
+  socketAddress: null | string;
   playersConnectAt: null | number;
 };
 
@@ -457,7 +457,7 @@ const startGame = (channelId: string): string => {
     mapVoteTimeout: null,
     map: null,
     findingServerAt: null,
-    socket: null,
+    socketAddress: null,
     settingMapAt: null,
     playersConnectAt: null,
   };
@@ -896,25 +896,27 @@ const sleep = (ms: number) => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-const splitSocket = (socket: string): { ip: string; port: number } => {
-  const split = socket.split(":");
+const splitSocketAddress = (
+  socketAddress: string
+): { ip: string; port: number } => {
+  const split = socketAddress.split(":");
   const ip = split[0];
   const port = Number(split[1]);
   return { ip, port };
 };
 
-const getEnvSockets = (): string[] => {
+const getEnvSocketAddresses = (): string[] => {
   if (!process.env.TF2_SERVERS) {
-    throw new Error("No sockets/tf2 servers set!");
+    throw new Error("No socketAddresses/tf2 servers set!");
   } else {
     return process.env.TF2_SERVERS.split(",");
   }
 };
 
 const getServerDetails = async (
-  socket: string
-): Promise<null | { numPlayers: number; map: string }> => {
-  const { ip, port } = splitSocket(socket);
+  socketAddress: string
+): Promise<null | { numPlayers: number; map: string; name: string }> => {
+  const { ip, port } = splitSocketAddress(socketAddress);
 
   try {
     const response = await Gamedig.query({
@@ -924,29 +926,38 @@ const getServerDetails = async (
       host: ip,
       port,
     });
-    return { numPlayers: response.players.length, map: response.map };
+    return {
+      numPlayers: response.players.length,
+      map: response.map,
+      name: response.name,
+    };
   } catch (e) {
-    console.log(`Error getting server response for ${socket}.`);
+    console.log(`Error getting server response for ${socketAddress}.`);
     return null;
   }
 };
 
-const findAvailableServer = async (): Promise<string | null> => {
+type Server = {
+  socketAddress: string;
+  name: string;
+};
+
+const findAvailableServer = async (): Promise<Server | null> => {
   // Find a server with no players on it from set of available servers
 
   if (getIsTestMode()) {
     console.log("Not attempting to find a server as we are in test mode.");
     await sleep(500);
-    return "no-server";
+    return { name: "test-server", socketAddress: "127.0.0.1:27015" };
   }
 
-  const sockets = getEnvSockets();
+  const socketAddresses = getEnvSocketAddresses();
 
-  if (sockets) {
-    for (const socket of sockets) {
-      const details = await getServerDetails(socket);
+  if (socketAddresses) {
+    for (const socketAddress of socketAddresses) {
+      const details = await getServerDetails(socketAddress);
       if (details?.numPlayers === 0) {
-        return socket;
+        return { socketAddress: socketAddress, name: details.name };
       }
     }
   }
@@ -955,7 +966,10 @@ const findAvailableServer = async (): Promise<string | null> => {
 
 const RCON_TIMEOUT = 5000;
 
-const setMapOnServer = async (socket: string, map: string): Promise<string> => {
+const setMapOnServer = async (
+  socketAddress: string,
+  map: string
+): Promise<string> => {
   // Send rcon command to change the map on the server
   if (getIsTestMode()) {
     console.log("Not setting map on server as we are in test mode.");
@@ -963,7 +977,7 @@ const setMapOnServer = async (socket: string, map: string): Promise<string> => {
     return "Not setting map on server as we are in test mode.";
   }
 
-  const { ip, port } = splitSocket(socket);
+  const { ip, port } = splitSocketAddress(socketAddress);
   const password = process.env.RCON_PASSWORD;
   const conn = new Rcon(ip, port, password);
 
@@ -1022,7 +1036,7 @@ const setMapOnServer = async (socket: string, map: string): Promise<string> => {
   return msg;
 };
 
-const vacate = async (socket: string): Promise<string> => {
+const vacate = async (socketAddress: string): Promise<string> => {
   // Send rcon command to kick players from the server
 
   if (getIsTestMode()) {
@@ -1030,7 +1044,7 @@ const vacate = async (socket: string): Promise<string> => {
     return "Not vacating as we are in test mode.";
   }
 
-  const { ip, port } = splitSocket(socket);
+  const { ip, port } = splitSocketAddress(socketAddress);
   const password = process.env.RCON_PASSWORD;
   const conn = new Rcon(ip, port, password);
 
@@ -1164,33 +1178,33 @@ const mapVoteComplete = async (channelId: string) => {
 
   sendMsg(channelId, msgs.join("\n"));
 
-  let socket: null | string = null;
+  let server: null | Server = null;
   for (let x = 0; x < FIND_SERVER_ATTEMPTS; x++) {
-    socket = await findAvailableServer();
-    if (socket) {
+    server = await findAvailableServer();
+    if (server) {
       break;
     } else {
       await sleep(FIND_SERVER_INTERVAL);
     }
   }
 
-  if (socket) {
+  if (server) {
     updateGame({
       type: UPDATE_GAME,
       payload: {
         channelId,
         state: GameState.SettingMap,
-        socket,
+        socketAddress: server.socketAddress,
         settingMapAt: Date.now(),
       },
     });
 
     sendMsg(
       channelId,
-      `:handshake: Found a server (${socket}). Attempting to set the map to **${winningMap}**...`
+      `:handshake: Found server: ${server.name} (${server.socketAddress}). Attempting to set the map to **${winningMap}**...`
     );
 
-    const setMapStatus = await setMapOnServer(socket, winningMap);
+    const setMapStatus = await setMapOnServer(server.socketAddress, winningMap);
 
     sendMsg(channelId, setMapStatus);
 
@@ -1209,7 +1223,7 @@ const mapVoteComplete = async (channelId: string) => {
     for (const playerId of playerIds) {
       sendDM(
         playerId,
-        `Your ${game.mode} PUG is ready. Please join the server at: steam://connect/${game.socket}/games`
+        `Your ${game.mode} PUG is ready. Please join the server at: steam://connect/${game.socketAddress}/games`
       );
     }
 
@@ -1682,7 +1696,7 @@ const hasPermission = (
 };
 
 export const run = () => {
-  getEnvSockets(); // Sanity check TF2 servers set correctly in the .env file
+  getEnvSocketAddresses(); // Sanity check TF2 servers set correctly in the .env file
   setUpDataDirs();
   loadChannels();
 
@@ -1803,16 +1817,18 @@ export const run = () => {
           await interaction.deferReply({ ephemeral: true });
 
           const row = new MessageActionRow();
-          const sockets = getEnvSockets();
-          for (const socket of sockets) {
-            const details = await getServerDetails(socket);
+          const socketAddresses = getEnvSocketAddresses();
+          for (const socketAddress of socketAddresses) {
+            const details = await getServerDetails(socketAddress);
             row.addComponents(
               new MessageButton()
-                .setCustomId(`${VACATE_BUTTON_PREFIX}${socket}`)
+                .setCustomId(`${VACATE_BUTTON_PREFIX}${socketAddress}`)
                 .setLabel(
-                  `Vacate ${socket} (No. connected: ${
+                  `${
+                    details?.name ?? "unknown"
+                  } (${socketAddress}). No. connected: ${
                     details?.numPlayers ?? "unknown"
-                  }. Map: ${details?.map ?? "unknown"})`
+                  }. Map: ${details?.map ?? "unknown"}.`
                 )
                 .setStyle("DANGER")
             );
@@ -1860,8 +1876,8 @@ export const run = () => {
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
       if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
-        const socket = customId.split(VACATE_BUTTON_PREFIX)[1];
-        const msg = await vacate(socket);
+        const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
+        const msg = await vacate(socketAddress);
         interaction.editReply({ content: msg });
       } else {
         interaction.reply({
