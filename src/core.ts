@@ -584,7 +584,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
           } unready player(s) as they did not ready up in time.\n${getStatus(
             channelId
           )}`,
-          `${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
+          `Removed: ${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
         );
       }, READY_TIMEOUT);
 
@@ -620,7 +620,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
           .send({
             embeds: [embed],
             components: [row],
-            content: `${unreadyPlayerIds
+            content: `Unready: ${unreadyPlayerIds
               .map((p) => mentionPlayer(p))
               .join(" ")}`,
           })
@@ -642,10 +642,12 @@ const removePlayers = (channelId: string, playerIds: string[]) => {
   store.dispatch({ type: REMOVE_PLAYERS, payload: { channelId, playerIds } });
   sendMsg(
     channelId,
-    `:warning: Removed players from this game as they are in another game that is about to start.\n${getStatus(
+    `:warning: Removed ${
+      playerIds.length
+    } player(s) from this game as they are in another game that is about to start.\n${getStatus(
       channelId
     )}`,
-    playerIds.map((p) => mentionPlayer(p)).join(" ")
+    `Removed: ${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
   );
 };
 
@@ -749,7 +751,9 @@ const startMapVote = (channelId: string) => {
       channel.send({
         embeds: [embed],
         components: rows,
-        content: players.map((p) => mentionPlayer(p.id)).join(" "),
+        content: `Vote now: ${players
+          .map((p) => mentionPlayer(p.id))
+          .join(" ")}`,
       });
     }
   }
