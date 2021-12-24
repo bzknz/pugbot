@@ -4,9 +4,9 @@
   "description": "",
   "main": "src/index.ts",
   "scripts": {
-    "test": "tsc && node dist/test.js",
-    "register": "tsc && node dist/register.js",
-    "start": "tsc && node dist/index.js"
+    "test": "tsc && node --enable-source-maps dist/test.js",
+    "register": "tsc && node --enable-source-maps dist/register.js",
+    "start": "tsc && node --enable-source-maps dist/index.js"
   },
   "author": "",
   "license": "ISC",
