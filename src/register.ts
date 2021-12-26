@@ -13,9 +13,6 @@ const run = async () => {
 
   const commands = [
     new SlashCommandBuilder()
-      .setName(Commands.Ping)
-      .setDescription("Replies with pong!"),
-    new SlashCommandBuilder()
       .setName(Commands.Setup)
       .setDescription("Set's up the game mode of the PUG")
       .addStringOption((option) =>
@@ -31,29 +28,29 @@ const run = async () => {
       ),
     new SlashCommandBuilder()
       .setName(Commands.Start)
-      .setDescription("Starts a new PUG"),
+      .setDescription("Start a new PUG."),
     new SlashCommandBuilder()
       .setName(Commands.Status)
-      .setDescription("Get status of current PUG"),
+      .setDescription("Get the status of current PUG."),
     new SlashCommandBuilder()
       .setName(Commands.Maps)
       .setDescription(
-        "List all maps available for the game mode of the channel"
+        "List all maps available for the game mode of the channel."
       ),
     new SlashCommandBuilder()
       .setName(Commands.Add)
-      .setDescription("Adds to the PUG"),
+      .setDescription("Add to the PUG."),
     new SlashCommandBuilder()
       .setName(Commands.Remove)
-      .setDescription("Removes from the PUG"),
+      .setDescription("Remove from the PUG."),
     new SlashCommandBuilder()
       .setName(Commands.Kick)
-      .setDescription("Kicks a player from the PUG")
+      .setDescription("Kick a player from the PUG.")
       .addUserOption((option) =>
         option
           .setName("user")
           .setRequired(true)
-          .setDescription("The player to be kicked")
+          .setDescription("The player to be kicked.")
       ),
     new SlashCommandBuilder()
       .setName(Commands.Ready)
@@ -61,7 +58,7 @@ const run = async () => {
       .addNumberOption((option) =>
         option
           .setName("minutes")
-          .setDescription("The number of minutes you want to ready up for")
+          .setDescription("The number of minutes you want to be ready for.")
           .setRequired(false)
       ),
     new SlashCommandBuilder()
@@ -71,6 +68,11 @@ const run = async () => {
       .setName(Commands.Vacate)
       .setDescription(
         "Kick all players from a TF2 server. You will be asked (buttons) which server to kick players from."
+      ),
+    new SlashCommandBuilder()
+      .setName(Commands.MapVote)
+      .setDescription(
+        "Vote for the map you want to play. You will be presented with button options."
       ),
   ].map((command) => command.toJSON());
 

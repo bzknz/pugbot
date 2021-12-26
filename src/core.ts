@@ -79,7 +79,7 @@ const READY_BUTTON = "ready";
 const VACATE_BUTTON_PREFIX = "vacate-";
 
 const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
-const NO_GAME_STARTED = `No game started. Use /start or /add to start one.`;
+const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
 
 const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
 const CREATE_GAME = "CREATE_GAME";
@@ -678,6 +678,32 @@ const removePlayersFromOtherGames = (channelId: string) => {
   }
 };
 
+const getMapVoteButtons = (channelId: string): Discord.MessageActionRow[] => {
+  const game = getGame(channelId);
+
+  const maps = getGameModeMaps(game.mode);
+
+  const rows = [new MessageActionRow()];
+
+  for (let x = 1; x <= maps.length; x++) {
+    let lastRow = rows[rows.length - 1];
+    if (lastRow.components.length === 5) {
+      // Need a new row (max 5 buttons per row [Discord limitation])
+      rows.push(new MessageActionRow());
+      lastRow = rows[rows.length - 1];
+    }
+    const mapName = maps[x - 1];
+    lastRow.addComponents(
+      new MessageButton()
+        .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
+        .setLabel(mapName)
+        .setStyle("SECONDARY")
+    );
+  }
+
+  return rows;
+};
+
 const startMapVote = (channelId: string) => {
   // All players are now ready - start map vote
   removePlayersFromOtherGames(channelId);
@@ -720,28 +746,9 @@ const startMapVote = (channelId: string) => {
       },
     });
 
+    const rows = getMapVoteButtons(channelId);
+
     const game = getGame(channelId);
-
-    const rows = [new MessageActionRow()];
-
-    for (let x = 1; x <= maps.length; x++) {
-      let lastRow = rows[rows.length - 1];
-      if (lastRow.components.length === 5) {
-        // Need a new row
-        rows.push(new MessageActionRow());
-        lastRow = rows[rows.length - 1];
-      }
-      const mapName = maps[x - 1];
-      lastRow.addComponents(
-        new MessageButton()
-          .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
-          .setLabel(mapName)
-          .setStyle("SECONDARY")
-      );
-    }
-
-    const channel = getDiscordChannel(channelId);
-
     const players = getPlayers(game);
     const embed = getEmbed(
       `:ballot_box: Map vote starting now. Please click the map you want to play. Waiting ${
@@ -749,6 +756,7 @@ const startMapVote = (channelId: string) => {
       } seconds for votes.`
     );
 
+    const channel = getDiscordChannel(channelId);
     if (channel?.isText()) {
       channel.send({
         embeds: [embed],
@@ -1268,28 +1276,41 @@ const mapVoteComplete = async (channelId: string) => {
   store.dispatch({ type: REMOVE_GAME, payload: channelId });
 };
 
+const getCanVote = (
+  channelId: string,
+  playerId: string
+): { isAllowed: false; msg: string } | { isAllowed: true } => {
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return { isAllowed: false, msg: CHANNEL_NOT_SET_UP };
+  }
+
+  const existingGame = getGame(channelId);
+  if (!existingGame) {
+    return { isAllowed: false, msg: NO_GAME_STARTED };
+  }
+
+  const isAdded = checkPlayerAdded(channelId, playerId);
+  if (!isAdded) {
+    return { isAllowed: false, msg: `You are not added. Ignoring vote.` };
+  }
+
+  if (![GameState.AddRemove, GameState.MapVote].includes(existingGame.state)) {
+    return { isAllowed: false, msg: `You cannot vote now. Ignoring vote.` };
+  }
+
+  return { isAllowed: true };
+};
+
 const mapVote = (
   channelId: string,
   playerId: string,
   mapVote: string
 ): string => {
-  const channel = getChannel(channelId);
-  if (!channel) {
-    return CHANNEL_NOT_SET_UP;
-  }
+  const allowedStatus = getCanVote(channelId, playerId);
 
-  const existingGame = getGame(channelId);
-  if (!existingGame) {
-    return NO_GAME_STARTED;
-  }
-
-  if (existingGame.state !== GameState.MapVote) {
-    return `Not in map voting phase. Ignoring vote.`;
-  }
-
-  const isAdded = checkPlayerAdded(channelId, playerId);
-  if (!isAdded) {
-    return `You are not added. Ignoring vote.`;
+  if (!allowedStatus.isAllowed) {
+    return allowedStatus.msg;
   }
 
   store.dispatch({
@@ -1461,7 +1482,7 @@ export const test = async () => {
     assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
     assert(
       mapVote(testChannel1, `invalid`, testMap1) ===
-        `Not in map voting phase. Ignoring vote.`
+        `You are not added. Ignoring vote.`
     );
     assert.deepEqual(removePlayer(testChannel1, `1`), [
       `<@1> is not added. Ignoring.`,
@@ -1594,13 +1615,14 @@ export const test = async () => {
       readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
         `Can't ready <@1> right now. Ignoring.`
     );
+    console.log(mapVote(testChannel1, `invalid`, testMap1));
     assert(
       mapVote(testChannel1, `invalid`, testMap1) ===
-        `Not in map voting phase. Ignoring vote.`
+        `You are not added. Ignoring vote.`
     );
     assert(
       mapVote(testChannel1, `1`, testMap1) ===
-        `Not in map voting phase. Ignoring vote.`
+        `You cannot vote now. Ignoring vote.`
     );
     assert(stopGame(testChannel1) === "Can't stop the game now.");
 
@@ -1863,7 +1885,6 @@ export const test = async () => {
 };
 
 export enum Commands {
-  Ping = "ping",
   Setup = "setup",
   Start = "start",
   Status = "status",
@@ -1890,10 +1911,10 @@ const handleMultiResponse = (
 const NO_PERMISSION_MSG = "You do not have permission to do this.";
 
 const hasPermission = (
-  permissions: string | Readonly<Discord.Permissions>,
+  permissions: string | Readonly<Discord.Permissions> | undefined,
   permission: Discord.PermissionResolvable
 ): boolean => {
-  if (typeof permissions !== "string" && permissions.has(permission)) {
+  if (typeof permissions !== "string" && permissions?.has(permission)) {
     return true;
   }
   return false;
@@ -1917,13 +1938,9 @@ export const run = () => {
 
     const { commandName, channelId, user } = interaction;
     const playerId = user.id;
-    const playerPermissions = interaction.member.permissions;
+    const playerPermissions = interaction.member?.permissions;
 
     switch (commandName) {
-      case Commands.Ping: {
-        interaction.reply({ ephemeral: true, embeds: [getEmbed("Pong!")] });
-        break;
-      }
       case Commands.Setup: {
         if (
           hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
@@ -2058,6 +2075,26 @@ export const run = () => {
         }
         break;
       }
+      case Commands.MapVote: {
+        // Send map vote buttons privately to the user.
+        const canVoteStatus = getCanVote(channelId, playerId);
+
+        if (!canVoteStatus.isAllowed) {
+          interaction.reply(canVoteStatus.msg);
+          return;
+        }
+
+        const rows = getMapVoteButtons(channelId);
+        const embed = getEmbed("Please click the map you want to play.");
+
+        interaction.reply({
+          embeds: [embed],
+          components: rows,
+          ephemeral: true,
+        });
+
+        break;
+      }
     }
   });
 
@@ -2068,7 +2105,7 @@ export const run = () => {
 
     const { customId, channelId, user } = interaction;
     const playerId = user.id;
-    const playerPermissions = interaction.member.permissions;
+    const playerPermissions = interaction.member?.permissions;
 
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
