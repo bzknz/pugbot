@@ -879,9 +879,6 @@ const readyPlayer = (
   });
 
   const readyUntilDate = new Date(readyUntil);
-  const msgs = `${mentionPlayer(playerId)} is ready for ${Math.round(
-    time / 1000 / 60
-  )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
 
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const game = getGame(channelId);
@@ -892,7 +889,9 @@ const readyPlayer = (
   ) {
     startMapVote(channelId);
   }
-  return msgs;
+  return `${mentionPlayer(playerId)} is ready for ${Math.round(
+    time / 1000 / 60
+  )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
 };
 
 const GAME_ID = "tf2";
