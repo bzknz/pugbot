@@ -557,14 +557,15 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
 
     sendMsg(channelId, `The game is full.`);
 
-    const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+    const unreadyAfter = Date.now();
+    const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
     if (unreadyPlayerIds.length === 0) {
       startMapVote(channelId);
     } else {
       // Setup timeout if not all players ready up in time.
       const readyTimeout = setTimeout(() => {
         // If this runs, remove the unready players
-        const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+        const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
         store.dispatch({
           type: REMOVE_PLAYERS,
           payload: { channelId, playerIds: unreadyPlayerIds },
@@ -880,8 +881,13 @@ const readyPlayer = (
 
   const readyUntilDate = new Date(readyUntil);
 
-  const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const game = getGame(channelId);
+  // Use readyCheckAt if we are in ready up state otherwise some players could become unready (timed out during ready check)
+  const unreadyAfter =
+    game.state === GameState.ReadyCheck && game.readyCheckAt
+      ? game.readyCheckAt
+      : Date.now();
+  const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
   const players = getPlayers(game);
   if (
     unreadyPlayerIds.length === 0 &&
@@ -1311,8 +1317,8 @@ const mapVote = (
   return `You voted for ${mapVote}.`;
 };
 
-const isPlayerReady = (timestamp: number, playerReadyUntil: number) =>
-  playerReadyUntil >= timestamp;
+const isPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
+  playerReadyUntil >= unreadyAfter;
 
 const sortPlayers = (a: Player, b: Player) =>
   a.queuedAt <= b.queuedAt ? -1 : 1;
@@ -1320,13 +1326,15 @@ const sortPlayers = (a: Player, b: Player) =>
 const getPlayers = (game: Game) =>
   Object.values(game.players).sort(sortPlayers);
 
-const getUnreadyPlayerIds = (channelId: string): string[] => {
-  const now = Date.now();
+const getUnreadyPlayerIds = (
+  channelId: string,
+  unreadyAfter: number
+): string[] => {
   const game = getGame(channelId);
   const players = getPlayers(game);
   const unreadyPlayerIds = [];
   for (const player of players) {
-    const isReady = isPlayerReady(now, player.readyUntil);
+    const isReady = isPlayerReady(unreadyAfter, player.readyUntil);
     if (!isReady) {
       unreadyPlayerIds.push(player.id);
     }
@@ -1359,7 +1367,7 @@ export const test = async () => {
   process.env.TEST_MODE = "true";
 
   // Manually set timeouts to low values
-  const overrideTimeout = 500;
+  const overrideTimeout = 1000;
   READY_TIMEOUT = overrideTimeout;
   MAP_VOTE_TIMEOUT = overrideTimeout;
 
@@ -1375,396 +1383,466 @@ export const test = async () => {
   const testMap2 = "cp_granary_pro_rc8";
   const testMap3 = "cp_reckoner_rc6";
 
-  // Test invalid commands when channel is not set up
-  assert(startGame(testChannel1) === CHANNEL_NOT_SET_UP);
-  assert.deepEqual(addPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
-  assert.deepEqual(removePlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
-  assert(
-    readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === CHANNEL_NOT_SET_UP
-  );
-  assert(mapVote(testChannel1, `invalid`, testMap1) === CHANNEL_NOT_SET_UP);
-  assert(stopGame(testChannel1) === CHANNEL_NOT_SET_UP);
-  assert(getStatus(testChannel1) === CHANNEL_NOT_SET_UP);
-  assert(listMaps(testChannel1) === CHANNEL_NOT_SET_UP);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
+  const testGame = async () => {
+    // Test invalid commands when channel is not set up
+    assert(startGame(testChannel1) === CHANNEL_NOT_SET_UP);
+    assert.deepEqual(addPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(removePlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === CHANNEL_NOT_SET_UP
+    );
+    assert(mapVote(testChannel1, `invalid`, testMap1) === CHANNEL_NOT_SET_UP);
+    assert(stopGame(testChannel1) === CHANNEL_NOT_SET_UP);
+    assert(getStatus(testChannel1) === CHANNEL_NOT_SET_UP);
+    assert(listMaps(testChannel1) === CHANNEL_NOT_SET_UP);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
 
-  // Setup channel
-  assert(
-    setChannelGameMode(testChannel1, GameMode.Sixes) ===
-      `Game mode set to SIXES.`
-  );
+    // Setup channel
+    assert(
+      setChannelGameMode(testChannel1, GameMode.Sixes) ===
+        `Game mode set to SIXES.`
+    );
 
-  // Test invalid commands when channel set up but no game started
-  assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
-  assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
-  assert(readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED);
-  assert(stopGame(testChannel1) === NO_GAME_STARTED);
-  assert(getStatus(testChannel1) === NO_GAME_STARTED);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+    // Test invalid commands when channel set up but no game started
+    assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
+    assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED
+    );
+    assert(stopGame(testChannel1) === NO_GAME_STARTED);
+    assert(getStatus(testChannel1) === NO_GAME_STARTED);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
 
-  assert(
-    listMaps(testChannel1) ===
-      `Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx`
-  );
+    assert(
+      listMaps(testChannel1) ===
+        `Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx`
+    );
 
-  // Start a game with /add
-  assert.deepEqual(addPlayer(testChannel1, `1`), [
-    STARTING_FROM_ADD,
-    NEW_GAME_STARTED,
-    `Added: <@1>`,
-    `Status (1/12): <@1>:ballot_box_with_check: `,
-  ]);
+    // Start a game with /add
+    assert.deepEqual(addPlayer(testChannel1, `1`), [
+      STARTING_FROM_ADD,
+      NEW_GAME_STARTED,
+      `Added: <@1>`,
+      `Status (1/12): <@1>:ballot_box_with_check: `,
+    ]);
 
-  // Stop the game
-  assert(stopGame(testChannel1) === STOPPED_GAME);
+    // Stop the game
+    assert(stopGame(testChannel1) === STOPPED_GAME);
 
-  // Change channel type
-  assert(
-    setChannelGameMode(testChannel1, GameMode.BBall) ===
-      `Game mode set to BBALL.`
-  );
-  assert(
-    setChannelGameMode(testChannel1, GameMode.Ultiduo) ===
-      `Game mode set to ULTIDUO.`
-  );
-  assert(
-    setChannelGameMode(testChannel1, GameMode.Highlander) ===
-      `Game mode set to HIGHLANDER.`
-  );
-  assert(
-    setChannelGameMode(testChannel1, GameMode.Test) === `Game mode set to TEST.`
-  );
-  assert(
-    setChannelGameMode(testChannel1, GameMode.Sixes) ===
-      `Game mode set to SIXES.`
-  );
+    // Change channel type
+    assert(
+      setChannelGameMode(testChannel1, GameMode.BBall) ===
+        `Game mode set to BBALL.`
+    );
+    assert(
+      setChannelGameMode(testChannel1, GameMode.Ultiduo) ===
+        `Game mode set to ULTIDUO.`
+    );
+    assert(
+      setChannelGameMode(testChannel1, GameMode.Highlander) ===
+        `Game mode set to HIGHLANDER.`
+    );
+    assert(
+      setChannelGameMode(testChannel1, GameMode.Test) ===
+        `Game mode set to TEST.`
+    );
+    assert(
+      setChannelGameMode(testChannel1, GameMode.Sixes) ===
+        `Game mode set to SIXES.`
+    );
 
-  // Start game
-  assert(startGame(testChannel1) === NEW_GAME_STARTED);
+    // Start game
+    assert(startGame(testChannel1) === NEW_GAME_STARTED);
 
-  // Empty game status
-  assert(getStatus(testChannel1) === "Status (0/12): Empty");
+    // Empty game status
+    assert(getStatus(testChannel1) === "Status (0/12): Empty");
 
-  // Test invalid commands right after new game started
-  assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-  assert(
-    mapVote(testChannel1, `invalid`, testMap1) ===
+    // Test invalid commands right after new game started
+    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
+    assert(
+      mapVote(testChannel1, `invalid`, testMap1) ===
+        `Not in map voting phase. Ignoring vote.`
+    );
+    assert.deepEqual(removePlayer(testChannel1, `1`), [
+      `<@1> is not added. Ignoring.`,
+    ]);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [
+      `<@1> is not added. Ignoring.`,
+    ]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
+        "<@1> is not added. Ignoring."
+    );
+
+    // Add 11 Status (not full)
+    for (let x = 0; x < 11; x++) {
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
+        `Added: <@${x + 1}>`,
+        getStatus(testChannel1),
+      ]);
+      await sleep(10); // Get a different timestamp for each player
+    }
+
+    // Check status
+    assert(
+      getStatus(testChannel1) ===
+        "Status (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: "
+    );
+
+    // Ready player 11
+    assert(
+      readyPlayer(testChannel1, "11", DEFAULT_READY_FOR).includes(
+        "<@11> is ready for 10min (until "
+      )
+    );
+
+    // Test ready player that is not added
+    assert(
+      readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR).includes(
+        `<@invalid> is not added. Ignoring.`
+      )
+    );
+
+    // Try add player again
+    assert.deepEqual(addPlayer(testChannel1, `1`), [
+      `<@1> is already added. Ignoring.`,
+    ]);
+
+    // Remove all 11 players
+    for (let x = 0; x < 11; x++) {
+      assert.deepEqual(removePlayer(testChannel1, `${x + 1}`), [
+        `Removed: <@${x + 1}>`,
+        getStatus(testChannel1),
+      ]);
+    }
+
+    // Add all players to fill game
+    for (let x = 0; x < 12; x++) {
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
+        `Added: <@${x + 1}>`,
+        getStatus(testChannel1),
+      ]);
+      await sleep(10); // Get a different timestamp for each player
+    }
+
+    // Check in map vote state
+    assert(getPlayers(store.getState().games[testChannel1]).length === 12);
+    assert(store.getState().games[testChannel1].state === GameState.MapVote);
+
+    // Test invalid actions when in map vote state
+    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
+    assert.deepEqual(addPlayer(testChannel1, `1`), [
+      `Can't add <@1> right now. Ignoring.`,
+    ]);
+    assert.deepEqual(removePlayer(testChannel1, `1`), [
+      `Can't remove <@1> right now. Ignoring.`,
+    ]);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [
+      `Can't remove <@1> right now. Ignoring.`,
+    ]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
+        `Can't ready <@1> right now. Ignoring.`
+    );
+    assert(
+      mapVote(testChannel1, `invalid`, testMap1) ===
+        `You are not added. Ignoring vote.`
+    );
+    assert(stopGame(testChannel1) === "Can't stop the game now.");
+
+    // Players vote for one of three maps (even distribution)
+    for (let x = 0; x < 12; x++) {
+      const map = x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3;
+      assert(
+        mapVote(testChannel1, `${x + 1}`, map) === `You voted for ${map}.`
+      );
+    }
+
+    // Check the winning map one of the three test maps (should be randomly selected)
+    const compareMapsTo = [testMap1, testMap2, testMap3] as string[];
+    assert(store.getState().games[testChannel1].map !== null);
+    assert(
+      compareMapsTo.includes(store.getState().games[testChannel1].map as string)
+    );
+    assert(
+      store.getState().games[testChannel1].state === GameState.FindingServer
+    );
+    assert(
+      Object.values(store.getState().games[testChannel1].players).length === 12
+    );
+
+    // Now the bot should look for an available server and set the map on the server
+
+    // Check invalid commands when looking for server and setting map
+    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
+    assert.deepEqual(addPlayer(testChannel1, `1`), [
+      `Can't add <@1> right now. Ignoring.`,
+    ]);
+    assert.deepEqual(removePlayer(testChannel1, `1`), [
+      `Can't remove <@1> right now. Ignoring.`,
+    ]);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [
+      `Can't remove <@1> right now. Ignoring.`,
+    ]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
+        `Can't ready <@1> right now. Ignoring.`
+    );
+    assert(
+      mapVote(testChannel1, `invalid`, testMap1) ===
+        `Not in map voting phase. Ignoring vote.`
+    );
+    assert(
+      mapVote(testChannel1, `1`, testMap1) ===
+        `Not in map voting phase. Ignoring vote.`
+    );
+    assert(stopGame(testChannel1) === "Can't stop the game now.");
+
+    // Wait for async work to complete (looking for server + setting map)
+    await sleep(TEST_SLEEP_FOR * 3);
+
+    // Game should now be cleared for testChannel1
+    assert(store.getState().games[testChannel1] === undefined);
+
+    // Check the stored JSON file (game state)
+    const storedGame: Game = JSON.parse(
+      fs.readFileSync(
+        `${GAMES_PATH}/${orderRecentFiles(GAMES_PATH)[0].file}`,
+        "utf-8"
+      )
+    );
+    assert(storedGame.state === GameState.PlayersConnect);
+    assert(Object.values(storedGame.players).length === 12);
+
+    // Test invalid after game has been completed and another has not started yet
+    assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
+    assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+    assert(
+      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED
+    );
+    assert(stopGame(testChannel1) === NO_GAME_STARTED);
+    assert(getStatus(testChannel1) === NO_GAME_STARTED);
+    assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+
+    // Start a second game by adding a player to test ready up timeout
+    assert.deepEqual(addPlayer(testChannel1, `1`), [
+      STARTING_FROM_ADD,
+      NEW_GAME_STARTED,
+      `Added: <@1>`,
+      getStatus(testChannel1),
+    ]);
+
+    assert(store.getState().games[testChannel1].state === GameState.AddRemove);
+
+    // Add another 10 players ( total 11)
+    for (let x = 1; x < 11; x++) {
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
+        `Added: <@${x + 1}>`,
+        getStatus(testChannel1),
+      ]);
+      await sleep(10); // Get a different timestamp for each player
+    }
+
+    // Check for 11 players
+    assert(
+      Object.values(store.getState().games[testChannel1].players).length === 11
+    );
+
+    // Manually set the 11 players currently added to unready
+    const readyUntilTimestamp = Date.now() - 1000; // 1 sec in the past
+    for (let x = 0; x < 11; x++) {
+      const game = store.getState().games[testChannel1];
+      store.dispatch({
+        type: READY_PLAYER,
+        payload: {
+          channelId: game.channelId,
+          playerId: `${x + 1}`,
+          readyUntil: readyUntilTimestamp,
+        },
+      });
+    }
+
+    // Add last player
+    assert.deepEqual(addPlayer(testChannel1, `12`), [
+      `Added: <@12>`,
+      getStatus(testChannel1),
+    ]);
+
+    assert(store.getState().games[testChannel1].state === GameState.ReadyCheck);
+
+    // Test invalid states when waiting for players to ready up
+    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
+    assert.deepEqual(addPlayer(testChannel1, `12`), [
+      `Can't add <@12> right now. Ignoring.`,
+    ]);
+    assert(
+      mapVote(testChannel1, `invalid`, testMap1),
       `Not in map voting phase. Ignoring vote.`
-  );
-  assert.deepEqual(removePlayer(testChannel1, `1`), [
-    `<@1> is not added. Ignoring.`,
-  ]);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [
-    `<@1> is not added. Ignoring.`,
-  ]);
-  assert(
-    readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-      "<@1> is not added. Ignoring."
-  );
+    );
+    assert(stopGame(testChannel1), "Can't stop the game now.");
 
-  // Add 11 Status (not full)
-  for (let x = 0; x < 11; x++) {
-    assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added: <@${x + 1}>`,
+    // Readying up a player should work at this stage
+    assert(
+      readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR).includes(
+        `<@12> is ready for 10min (until `
+      )
+    );
+
+    // Test removing player when waiting for players to ready up
+    assert.deepEqual(removePlayer(testChannel1, `12`), [
+      "Cancelling ready check.",
+      "Removed: <@12>",
       getStatus(testChannel1),
     ]);
-    await sleep(10); // Get a different timestamp for each player
-  }
 
-  // Check status
-  assert(
-    getStatus(testChannel1) ===
-      "Status (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: "
-  );
+    assert(store.getState().games[testChannel1].state === GameState.AddRemove);
+    assert(
+      Object.values(store.getState().games[testChannel1].players).length === 11
+    );
 
-  // Ready player 11
-  assert(
-    readyPlayer(testChannel1, "11", DEFAULT_READY_FOR).includes(
-      "<@11> is ready for 10min (until "
-    )
-  );
-
-  // Test ready player that is not added
-  assert(
-    readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR).includes(
-      `<@invalid> is not added. Ignoring.`
-    )
-  );
-
-  // Try add player again
-  assert.deepEqual(addPlayer(testChannel1, `1`), [
-    `<@1> is already added. Ignoring.`,
-  ]);
-
-  // Remove all 11 players
-  for (let x = 0; x < 11; x++) {
-    assert.deepEqual(removePlayer(testChannel1, `${x + 1}`), [
-      `Removed: <@${x + 1}>`,
+    // Add a last player
+    assert.deepEqual(addPlayer(testChannel1, `12`), [
+      `Added: <@12>`,
       getStatus(testChannel1),
     ]);
-  }
 
-  // Add all players to fill game
-  for (let x = 0; x < 12; x++) {
-    assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added: <@${x + 1}>`,
-      getStatus(testChannel1),
+    // Wait for ready up timeout
+    await sleep(overrideTimeout + 100);
+
+    // 11 out of the 12 players should have been removed (did not ready up)
+    assert(store.getState().games[testChannel1].state === GameState.AddRemove);
+    assert(
+      Object.values(store.getState().games[testChannel1].players).length === 1
+    );
+    assert(
+      Object.values(store.getState().games[testChannel1].players)[0].id === "12"
+    );
+
+    // Add another 11 players to fill the game again
+    for (let x = 0; x < 11; x++) {
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
+        `Added: <@${x + 1}>`,
+        getStatus(testChannel1),
+      ]);
+      await sleep(10); // Get a different timestamp for each player
+    }
+
+    // All players should be ready now and the map vote should now be happening
+    assert(store.getState().games[testChannel1].state === GameState.MapVote);
+    assert(
+      Object.values(store.getState().games[testChannel1].players).length === 12
+    );
+  };
+
+  const testUltiduo = async () => {
+    // Test a second channel with Ultiduo
+    assert(
+      setChannelGameMode(testChannel2, GameMode.Ultiduo) ===
+        `Game mode set to ULTIDUO.`
+    );
+    assert(startGame(testChannel2) === NEW_GAME_STARTED);
+    assert.deepEqual(addPlayer(testChannel2, `a`), [
+      `Added: <@a>`,
+      "Status (1/4): <@a>:ballot_box_with_check: ",
     ]);
-    await sleep(10); // Get a different timestamp for each player
-  }
-
-  // Check in map vote state
-  assert(getPlayers(store.getState().games[testChannel1]).length === 12);
-  assert(store.getState().games[testChannel1].state === GameState.MapVote);
-
-  // Test invalid actions when in map vote state
-  assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-  assert.deepEqual(addPlayer(testChannel1, `1`), [
-    `Can't add <@1> right now. Ignoring.`,
-  ]);
-  assert.deepEqual(removePlayer(testChannel1, `1`), [
-    `Can't remove <@1> right now. Ignoring.`,
-  ]);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [
-    `Can't remove <@1> right now. Ignoring.`,
-  ]);
-  assert(
-    readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-      `Can't ready <@1> right now. Ignoring.`
-  );
-  assert(
-    mapVote(testChannel1, `invalid`, testMap1) ===
-      `You are not added. Ignoring vote.`
-  );
-  assert(stopGame(testChannel1) === "Can't stop the game now.");
-
-  // Players vote for one of three maps (even distribution)
-  for (let x = 0; x < 12; x++) {
-    const map = x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3;
-    assert(mapVote(testChannel1, `${x + 1}`, map) === `You voted for ${map}.`);
-  }
-
-  // Check the winning map one of the three test maps (should be randomly selected)
-  const compareMapsTo = [testMap1, testMap2, testMap3] as string[];
-  assert(store.getState().games[testChannel1].map !== null);
-  assert(
-    compareMapsTo.includes(store.getState().games[testChannel1].map as string)
-  );
-  assert(
-    store.getState().games[testChannel1].state === GameState.FindingServer
-  );
-  assert(
-    Object.values(store.getState().games[testChannel1].players).length === 12
-  );
-
-  // Now the bot should look for an available server and set the map on the server
-
-  // Check invalid commands when looking for server and setting map
-  assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-  assert.deepEqual(addPlayer(testChannel1, `1`), [
-    `Can't add <@1> right now. Ignoring.`,
-  ]);
-  assert.deepEqual(removePlayer(testChannel1, `1`), [
-    `Can't remove <@1> right now. Ignoring.`,
-  ]);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [
-    `Can't remove <@1> right now. Ignoring.`,
-  ]);
-  assert(
-    readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-      `Can't ready <@1> right now. Ignoring.`
-  );
-  assert(
-    mapVote(testChannel1, `invalid`, testMap1) ===
-      `Not in map voting phase. Ignoring vote.`
-  );
-  assert(
-    mapVote(testChannel1, `1`, testMap1) ===
-      `Not in map voting phase. Ignoring vote.`
-  );
-  assert(stopGame(testChannel1) === "Can't stop the game now.");
-
-  // Wait for async work to complete (looking for server + setting map)
-  await sleep(TEST_SLEEP_FOR * 3);
-
-  // Game should now be cleared for testChannel1
-  assert(store.getState().games[testChannel1] === undefined);
-
-  // Check the stored JSON file (game state)
-  const storedGame: Game = JSON.parse(
-    fs.readFileSync(
-      `${GAMES_PATH}/${orderRecentFiles(GAMES_PATH)[0].file}`,
-      "utf-8"
-    )
-  );
-  assert(storedGame.state === GameState.PlayersConnect);
-  assert(Object.values(storedGame.players).length === 12);
-
-  // Test invalid after game has been completed and another has not started yet
-  assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
-  assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
-  assert(readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED);
-  assert(stopGame(testChannel1) === NO_GAME_STARTED);
-  assert(getStatus(testChannel1) === NO_GAME_STARTED);
-  assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
-
-  // Start a second game by adding a player to test ready up timeout
-  assert.deepEqual(addPlayer(testChannel1, `1`), [
-    STARTING_FROM_ADD,
-    NEW_GAME_STARTED,
-    `Added: <@1>`,
-    getStatus(testChannel1),
-  ]);
-
-  assert(store.getState().games[testChannel1].state === GameState.AddRemove);
-
-  // Add another 10 players ( total 11)
-  for (let x = 1; x < 11; x++) {
-    assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added: <@${x + 1}>`,
-      getStatus(testChannel1),
+    await sleep(10);
+    assert.deepEqual(addPlayer(testChannel2, `b`), [
+      `Added: <@b>`,
+      "Status (2/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: ",
     ]);
-    await sleep(10); // Get a different timestamp for each player
-  }
+    await sleep(10);
+    assert.deepEqual(addPlayer(testChannel2, `c`), [
+      `Added: <@c>`,
+      "Status (3/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: ",
+    ]);
+    await sleep(10);
+    assert.deepEqual(addPlayer(testChannel2, `d`), [
+      `Added: <@d>`,
+      "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
+    ]);
+    assert(
+      mapVote(testChannel2, `a`, "koth_ultiduo_r_b7") ===
+        `You voted for koth_ultiduo_r_b7.`
+    );
+    assert(
+      mapVote(testChannel2, `b`, "ultiduo_baloo_v2") ===
+        "You voted for ultiduo_baloo_v2."
+    );
+    assert(
+      mapVote(testChannel2, `c`, "ultiduo_baloo_v2") ===
+        "You voted for ultiduo_baloo_v2."
+    );
+    assert(
+      mapVote(testChannel2, `d`, "ultiduo_baloo_v2") ===
+        "You voted for ultiduo_baloo_v2."
+    );
 
-  // Check for 11 players
-  assert(
-    Object.values(store.getState().games[testChannel1].players).length === 11
-  );
+    // Check the winning map and num players
+    assert(
+      store.getState().games[testChannel2].state === GameState.FindingServer
+    );
+    assert(store.getState().games[testChannel2].map === "ultiduo_baloo_v2");
+    assert(
+      Object.values(store.getState().games[testChannel2].players).length === 4
+    );
+  };
 
-  // Manually set the 11 players currently added to unready
-  const readyUntilTimestamp = Date.now() - 1000; // 1 sec in the past
-  for (let x = 0; x < 11; x++) {
-    const game = store.getState().games[testChannel1];
+  const testUnreadyDuringReadyTimeout = async () => {
+    // Test player becoming unready while readying up players.
+    setChannelGameMode(testChannel3, GameMode.BBall);
+    addPlayer(testChannel3, "1");
+    addPlayer(testChannel3, "2");
+
+    // Manually set player 2's readyUntil so they are not ready when the game fills
     store.dispatch({
       type: READY_PLAYER,
       payload: {
-        channelId: game.channelId,
-        playerId: `${x + 1}`,
-        readyUntil: readyUntilTimestamp,
+        channelId: testChannel3,
+        playerId: "2",
+        readyUntil: Date.now() - 100,
       },
     });
-  }
 
-  // Add last player
-  assert.deepEqual(addPlayer(testChannel1, `12`), [
-    `Added: <@12>`,
-    getStatus(testChannel1),
-  ]);
+    // Add player 3
+    addPlayer(testChannel3, "3");
 
-  // Test invalid states when waiting for players to ready up
-  assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-  assert.deepEqual(addPlayer(testChannel1, `12`), [
-    `Can't add <@12> right now. Ignoring.`,
-  ]);
-  assert(
-    mapVote(testChannel1, `invalid`, testMap1),
-    `Not in map voting phase. Ignoring vote.`
-  );
-  assert(stopGame(testChannel1), "Can't stop the game now.");
+    // Manually set player 3's readyUntil so it lies within the readyTimeout
+    const readyUntil = Date.now() + overrideTimeout / 2;
+    store.dispatch({
+      type: READY_PLAYER,
+      payload: { channelId: testChannel3, playerId: "3", readyUntil },
+    });
 
-  // Readying up a player should work at this stage
-  assert(
-    readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR).includes(
-      `<@12> is ready for 10min (until `
-    )
-  );
+    // Add last player to fill game
+    addPlayer(testChannel3, "4");
 
-  // Test removing player when waiting for players to ready up
-  assert.deepEqual(removePlayer(testChannel1, `12`), [
-    "Cancelling ready check.",
-    "Removed: <@12>",
-    getStatus(testChannel1),
-  ]);
+    assert(store.getState().games[testChannel3].state === GameState.ReadyCheck);
 
-  assert(store.getState().games[testChannel1].state === GameState.AddRemove);
-  assert(
-    Object.values(store.getState().games[testChannel1].players).length === 11
-  );
+    assert(
+      readyUntil > (store.getState().games[testChannel3].readyCheckAt as number)
+    );
 
-  // Add a last player
-  assert.deepEqual(addPlayer(testChannel1, `12`), [
-    `Added: <@12>`,
-    getStatus(testChannel1),
-  ]);
+    // Wait until after ready timeout
+    await sleep(overrideTimeout + 100);
 
-  // Wait for ready up timeout
-  await sleep(overrideTimeout + 100);
+    assert(readyUntil < Date.now());
 
-  // 11 out of the 12 players should have been removed (did not ready up)
-  assert(store.getState().games[testChannel1].state === GameState.AddRemove);
-  assert(
-    Object.values(store.getState().games[testChannel1].players).length === 1
-  );
-  assert(
-    Object.values(store.getState().games[testChannel1].players)[0].id === "12"
-  );
+    assert(store.getState().games[testChannel3].state === GameState.AddRemove);
 
-  // Add another 11 players to fill the game again
-  for (let x = 0; x < 11; x++) {
-    assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-      `Added: <@${x + 1}>`,
-      getStatus(testChannel1),
-    ]);
-    await sleep(10); // Get a different timestamp for each player
-  }
+    // Players 1 and 4 should still be added
+    assert(store.getState().games[testChannel3].players["1"] !== undefined);
+    assert(store.getState().games[testChannel3].players["4"] !== undefined);
 
-  // All players should be ready now and the map vote should now be happening
-  assert(store.getState().games[testChannel1].state === GameState.MapVote);
-  assert(
-    Object.values(store.getState().games[testChannel1].players).length === 12
-  );
+    // Player 2 should be removed
+    assert(store.getState().games[testChannel3].players["2"] === undefined);
 
-  // Test a second channel with Ultiduo
-  assert(
-    setChannelGameMode(testChannel2, GameMode.Ultiduo) ===
-      `Game mode set to ULTIDUO.`
-  );
-  assert(startGame(testChannel2) === NEW_GAME_STARTED);
-  assert.deepEqual(addPlayer(testChannel2, `a`), [
-    `Added: <@a>`,
-    "Status (1/4): <@a>:ballot_box_with_check: ",
-  ]);
-  await sleep(10);
-  assert.deepEqual(addPlayer(testChannel2, `b`), [
-    `Added: <@b>`,
-    "Status (2/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: ",
-  ]);
-  await sleep(10);
-  assert.deepEqual(addPlayer(testChannel2, `c`), [
-    `Added: <@c>`,
-    "Status (3/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: ",
-  ]);
-  await sleep(10);
-  assert.deepEqual(addPlayer(testChannel2, `d`), [
-    `Added: <@d>`,
-    "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
-  ]);
-  assert(
-    mapVote(testChannel2, `a`, "koth_ultiduo_r_b7") ===
-      `You voted for koth_ultiduo_r_b7.`
-  );
-  assert(
-    mapVote(testChannel2, `b`, "ultiduo_baloo_v2") ===
-      "You voted for ultiduo_baloo_v2."
-  );
-  assert(
-    mapVote(testChannel2, `c`, "ultiduo_baloo_v2") ===
-      "You voted for ultiduo_baloo_v2."
-  );
-  assert(
-    mapVote(testChannel2, `d`, "ultiduo_baloo_v2") ===
-      "You voted for ultiduo_baloo_v2."
-  );
+    // Player 3 should still be added even through they became unready during the ready check timeout.
+    assert(store.getState().games[testChannel3].players["3"] !== undefined);
+  };
 
-  // Check the winning map and num players
-  assert(
-    store.getState().games[testChannel2].state === GameState.FindingServer
-  );
-  assert(store.getState().games[testChannel2].map === "ultiduo_baloo_v2");
-  assert(
-    Object.values(store.getState().games[testChannel2].players).length === 4
-  );
+  await testGame();
+  await testUltiduo();
+  await testUnreadyDuringReadyTimeout();
 };
 
 export enum Commands {
