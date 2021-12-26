@@ -904,7 +904,7 @@ const readyPlayer = (
     startMapVote(channelId);
   }
   return `${mentionPlayer(playerId)} is ready for ${Math.round(
-    time / 1000 / 60
+    normalizedTime / 1000 / 60
   )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
 };
 
