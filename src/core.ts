@@ -555,7 +555,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
       payload: { channelId, readyCheckAt: timestamp },
     });
 
-    sendMsg(channelId, `The game is full.`);
+    msgs.push(`The game is full.`);
 
     const unreadyAfter = Date.now();
     const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
@@ -1517,13 +1517,19 @@ export const test = async () => {
     }
 
     // Add all players to fill game
-    for (let x = 0; x < 12; x++) {
+    for (let x = 0; x < 11; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
         getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
+
+    assert.deepEqual(addPlayer(testChannel1, `12`), [
+      `Added: <@12>`,
+      getStatus(testChannel1),
+      `The game is full.`,
+    ]);
 
     // Check in map vote state
     assert(getPlayers(store.getState().games[testChannel1]).length === 12);
@@ -1623,7 +1629,9 @@ export const test = async () => {
     assert(stopGame(testChannel1) === NO_GAME_STARTED);
     assert(getStatus(testChannel1) === NO_GAME_STARTED);
     assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+  };
 
+  const testReadyTimeout = async () => {
     // Start a second game by adding a player to test ready up timeout
     assert.deepEqual(addPlayer(testChannel1, `1`), [
       STARTING_FROM_ADD,
@@ -1666,6 +1674,7 @@ export const test = async () => {
     assert.deepEqual(addPlayer(testChannel1, `12`), [
       `Added: <@12>`,
       getStatus(testChannel1),
+      `The game is full.`,
     ]);
 
     assert(store.getState().games[testChannel1].state === GameState.ReadyCheck);
@@ -1704,6 +1713,7 @@ export const test = async () => {
     assert.deepEqual(addPlayer(testChannel1, `12`), [
       `Added: <@12>`,
       getStatus(testChannel1),
+      `The game is full.`,
     ]);
 
     // Wait for ready up timeout
@@ -1719,13 +1729,18 @@ export const test = async () => {
     );
 
     // Add another 11 players to fill the game again
-    for (let x = 0; x < 11; x++) {
+    for (let x = 0; x < 10; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
         getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
+    assert.deepEqual(addPlayer(testChannel1, `11`), [
+      `Added: <@11>`,
+      getStatus(testChannel1),
+      "The game is full.",
+    ]);
 
     // All players should be ready now and the map vote should now be happening
     assert(store.getState().games[testChannel1].state === GameState.MapVote);
@@ -1759,6 +1774,7 @@ export const test = async () => {
     assert.deepEqual(addPlayer(testChannel2, `d`), [
       `Added: <@d>`,
       "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
+      "The game is full.",
     ]);
     assert(
       mapVote(testChannel2, `a`, "koth_ultiduo_r_b7") ===
@@ -1841,6 +1857,7 @@ export const test = async () => {
   };
 
   await testGame();
+  await testReadyTimeout();
   await testUltiduo();
   await testUnreadyDuringReadyTimeout();
 };
