@@ -12,12 +12,28 @@ import fs from "fs";
 import Gamedig from "gamedig";
 import path from "path";
 import { createStore } from "redux";
+import { filterObjectByKeys } from "./utils";
 
 const Rcon: any = require("rcon");
 
 dotenv.config();
 
 const client = new Discord.Client({ intents: [Intents.FLAGS.GUILDS] });
+
+export enum Commands {
+  Setup = "setup",
+  Start = "start",
+  Status = "status",
+  Maps = "maps",
+  Add = "add",
+  Remove = "remove",
+  Kick = "kick",
+  Vacate = "vacate",
+  Ready = "ready",
+  MapVote = "vote-map",
+  Stop = "stop",
+  ClearAFKs = "clear-afks",
+}
 
 type Player = {
   id: string;
@@ -73,13 +89,6 @@ type Channel = {
 type Channels = { [channelId: string]: Channel };
 
 type RootState = { games: Games; channels: Channels };
-
-const MAP_VOTE_PREFIX = "map-vote-";
-const READY_BUTTON = "ready";
-const VACATE_BUTTON_PREFIX = "vacate-";
-
-const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
-const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
 
 const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
 const CREATE_GAME = "CREATE_GAME";
@@ -155,6 +164,31 @@ const MIN_READY_FOR = 1000 * 60 * 5; // 5 min
 let READY_TIMEOUT = 1000 * 60; // 60 seconds
 let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds
 
+const BASE_PATH = `${__dirname}/../data`;
+const GAMES_PATH = `${BASE_PATH}/games`;
+const CHANNELS_PATH = `${BASE_PATH}/channels`;
+
+const GAME_ID = "tf2";
+
+const RCON_TIMEOUT = 5000;
+const TEST_SLEEP_FOR = 500;
+const FIND_SERVER_ATTEMPTS = 60;
+const FIND_SERVER_INTERVAL = 5000;
+
+const MAP_VOTE_PREFIX = "map-vote-";
+const READY_BUTTON = "ready";
+const VACATE_BUTTON_PREFIX = "vacate-";
+
+const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
+const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
+const NEW_GAME_STARTED = `New game started.`;
+const STARTING_FROM_ADD = `No game started. Starting one now.`;
+const GAME_ALREADY_STARTED = "A game has already been started.";
+const STOPPED_GAME = `Stopped game.`;
+const NO_PERMISSION_MSG = "You do not have permission to do this.";
+
+const getIsTestMode = () => process.env.TEST_MODE === "true";
+
 const gameModeToNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
     case GameMode.BBall:
@@ -170,17 +204,6 @@ const gameModeToNumPlayers = (gameMode: GameMode): number => {
     default:
       throw new Error("Unknown game type.");
   }
-};
-
-// https://stackoverflow.com/a/55743632/2410292
-const filterObjectByKeys = (object: any, keysToFilter: string[]) => {
-  return Object.keys(object).reduce((accum, key) => {
-    if (!keysToFilter.includes(key)) {
-      return { ...accum, [key]: object[key] };
-    } else {
-      return accum;
-    }
-  }, {});
 };
 
 const mentionPlayer = (playerId: string) => `<@${playerId}>`;
@@ -331,8 +354,6 @@ const reducer = (
 
 const store = createStore(reducer);
 
-const getIsTestMode = () => process.env.TEST_MODE === "true";
-
 const getDiscordChannel = (channelId: string) =>
   client.channels.cache.get(channelId);
 
@@ -365,10 +386,6 @@ const sendDM = (playerId: string, msg: string) => {
     user.send(msg);
   }
 };
-
-const BASE_PATH = `${__dirname}/../data`;
-const GAMES_PATH = `${BASE_PATH}/games`;
-const CHANNELS_PATH = `${BASE_PATH}/channels`;
 
 const setUpDataDirs = () => {
   if (!fs.existsSync(CHANNELS_PATH)) {
@@ -430,9 +447,6 @@ const checkPlayerAdded = (channelId: string, playerId: string) => {
   return !!game.players[playerId];
 };
 
-const NEW_GAME_STARTED = `New game started.`;
-const GAME_ALREADY_STARTED = "A game has already been started.";
-
 const startGame = (channelId: string): string => {
   const channel = getChannel(channelId);
   if (!channel) {
@@ -471,8 +485,6 @@ const updateGame = (action: UpdateGame) => {
   store.dispatch(action);
 };
 
-const STOPPED_GAME = `Stopped game.`;
-
 const stopGame = (channelId: string): string => {
   const channel = getChannel(channelId);
   if (!channel) {
@@ -496,8 +508,6 @@ const getGameModeMaps = (mode: GameMode) => {
   const maps = JSON.parse(fs.readFileSync(`${BASE_PATH}/maps.json`, "utf-8"));
   return maps[mode];
 };
-
-const STARTING_FROM_ADD = `No game started. Starting one now.`;
 
 const addPlayer = (channelId: string, playerId: string): string[] => {
   const channel = getChannel(channelId);
@@ -908,8 +918,6 @@ const readyPlayer = (
   )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
 };
 
-const GAME_ID = "tf2";
-
 const sleep = (ms: number) => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
@@ -981,10 +989,6 @@ const findAvailableServer = async (): Promise<Server | null> => {
   }
   return null;
 };
-
-const RCON_TIMEOUT = 5000;
-
-const TEST_SLEEP_FOR = 500;
 
 const setMapOnServer = async (
   socketAddress: string,
@@ -1140,9 +1144,6 @@ const getMapVoteCounts = (channelId: string) => {
   }
   return voteCounts;
 };
-
-const FIND_SERVER_ATTEMPTS = 60;
-const FIND_SERVER_INTERVAL = 5000;
 
 const mapVoteComplete = async (channelId: string) => {
   const msgs = [];
@@ -1381,6 +1382,245 @@ const orderRecentFiles = (dir: string) => {
     .filter((file) => fs.lstatSync(path.join(dir, file)).isFile())
     .map((file) => ({ file, mtime: fs.lstatSync(path.join(dir, file)).mtime }))
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+};
+
+const getEmbed = (msg: string) => new MessageEmbed().setDescription(msg);
+
+const handleMultiResponse = (
+  interaction: Discord.CommandInteraction<Discord.CacheType>,
+  msgs: string[]
+) => {
+  const msg = msgs.join(`\n`);
+  interaction.reply({ embeds: [getEmbed(msg)] });
+};
+
+const hasPermission = (
+  permissions: string | Readonly<Discord.Permissions> | undefined,
+  permission: Discord.PermissionResolvable
+): boolean => {
+  if (typeof permissions !== "string" && permissions?.has(permission)) {
+    return true;
+  }
+  return false;
+};
+
+export const run = () => {
+  getEnvSocketAddresses(); // Sanity check TF2 servers set correctly in the .env file
+  setUpDataDirs();
+  loadChannels();
+
+  client.login(process.env.DISCORD_BOT_TOKEN);
+
+  client.once("ready", () => {
+    console.log("Ready!");
+  });
+
+  client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isCommand()) {
+      return;
+    }
+
+    const { commandName, channelId, user } = interaction;
+    const playerId = user.id;
+    const playerPermissions = interaction.member?.permissions;
+
+    switch (commandName) {
+      case Commands.Setup: {
+        if (
+          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
+        ) {
+          const mode = interaction.options.getString("mode") as GameMode;
+          const msg = setChannelGameMode(channelId, mode);
+          interaction.reply({ embeds: [getEmbed(msg)] });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`
+              ),
+            ],
+            ephemeral: true,
+          });
+        }
+        break;
+      }
+      case Commands.Start: {
+        const msg = startGame(channelId);
+        interaction.reply({ embeds: [getEmbed(msg)] });
+        break;
+      }
+      case Commands.Status: {
+        const msg = getStatus(channelId);
+        interaction.reply({ embeds: [getEmbed(msg)] });
+        break;
+      }
+      case Commands.Maps: {
+        const msg = listMaps(channelId);
+        interaction.reply({ embeds: [getEmbed(msg)] });
+        break;
+      }
+      case Commands.Stop: {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+          const msg = stopGame(channelId);
+          interaction.reply({ embeds: [getEmbed(msg)] });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+              ),
+            ],
+            ephemeral: true,
+          });
+        }
+        break;
+      }
+      case Commands.Add: {
+        const msgs = addPlayer(channelId, playerId);
+        handleMultiResponse(interaction, msgs);
+        break;
+      }
+      case Commands.Remove: {
+        const msgs = removePlayer(channelId, playerId);
+        handleMultiResponse(interaction, msgs);
+        break;
+      }
+      case Commands.Kick: {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+          const targetPlayer = interaction.options.getUser("user");
+          if (targetPlayer) {
+            const msgs = kickPlayer(channelId, targetPlayer.id);
+            handleMultiResponse(interaction, msgs);
+          } else {
+            interaction.reply({
+              embeds: [getEmbed(`Could not find player to kick.`)],
+            });
+          }
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+              ),
+            ],
+            ephemeral: true,
+          });
+        }
+        break;
+      }
+      case Commands.Ready: {
+        const minutesIn = interaction.options.getNumber("minutes");
+        const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
+        const msg = readyPlayer(channelId, playerId, readyFor);
+        interaction.reply({ embeds: [getEmbed(msg)] });
+        break;
+      }
+      case Commands.Vacate: {
+        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+          // Send the user button options asking which server to vacate from.
+
+          await interaction.deferReply({ ephemeral: true });
+
+          const row = new MessageActionRow();
+          const socketAddresses = getEnvSocketAddresses();
+          for (const socketAddress of socketAddresses) {
+            const details = await getServerDetails(socketAddress);
+            row.addComponents(
+              new MessageButton()
+                .setCustomId(`${VACATE_BUTTON_PREFIX}${socketAddress}`)
+                .setLabel(
+                  `${
+                    details?.name ?? "unknown"
+                  } (${socketAddress}). No. connected: ${
+                    details?.numPlayers ?? "unknown"
+                  }. Map: ${details?.map ?? "unknown"}.`
+                )
+                .setStyle("DANGER")
+            );
+          }
+
+          interaction.editReply({
+            embeds: [
+              getEmbed(
+                "Please click the server you want to vacate. Make sure there is not a game currently happening on it!"
+              ),
+            ],
+            components: [row],
+          });
+        } else {
+          interaction.reply({
+            embeds: [
+              getEmbed(
+                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+              ),
+            ],
+            ephemeral: true,
+          });
+        }
+        break;
+      }
+      case Commands.MapVote: {
+        // Send map vote buttons privately to the user.
+        const canVoteStatus = getCanVote(channelId, playerId);
+
+        if (!canVoteStatus.isAllowed) {
+          interaction.reply({ content: canVoteStatus.msg, ephemeral: true });
+          return;
+        }
+
+        const rows = getMapVoteButtons(channelId);
+        const embed = getEmbed("Please click the map you want to play.");
+
+        interaction.reply({
+          embeds: [embed],
+          components: rows,
+          ephemeral: true,
+        });
+
+        break;
+      }
+      // case Commands.ClearAFKs: {
+      //   const msg = clearAFKs(channelId);
+      //   interaction.reply({ embeds: [getEmbed(msg)] });
+      //   break;
+      // }
+    }
+  });
+
+  client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isButton()) {
+      return;
+    }
+
+    const { customId, channelId, user } = interaction;
+    const playerId = user.id;
+    const playerPermissions = interaction.member?.permissions;
+
+    if (customId.includes(MAP_VOTE_PREFIX)) {
+      const map = customId.split(MAP_VOTE_PREFIX)[1];
+      const msg = mapVote(channelId, playerId, map);
+      interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
+    } else if (customId === READY_BUTTON) {
+      const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
+      interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
+    } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
+      if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+        await interaction.deferReply();
+        const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
+        const msg = await vacate(socketAddress);
+        interaction.editReply({ content: msg });
+      } else {
+        interaction.reply({
+          embeds: [
+            getEmbed(
+              `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
+            ),
+          ],
+          ephemeral: true,
+        });
+      }
+    }
+  });
 };
 
 export const test = async () => {
@@ -1882,254 +2122,4 @@ export const test = async () => {
   await testReadyTimeout();
   await testUltiduo();
   await testUnreadyDuringReadyTimeout();
-};
-
-export enum Commands {
-  Setup = "setup",
-  Start = "start",
-  Status = "status",
-  Maps = "maps",
-  Add = "add",
-  Remove = "remove",
-  Kick = "kick",
-  Vacate = "vacate",
-  Ready = "ready",
-  MapVote = "vote-map",
-  Stop = "stop",
-}
-
-const getEmbed = (msg: string) => new MessageEmbed().setDescription(msg);
-
-const handleMultiResponse = (
-  interaction: Discord.CommandInteraction<Discord.CacheType>,
-  msgs: string[]
-) => {
-  const msg = msgs.join(`\n`);
-  interaction.reply({ embeds: [getEmbed(msg)] });
-};
-
-const NO_PERMISSION_MSG = "You do not have permission to do this.";
-
-const hasPermission = (
-  permissions: string | Readonly<Discord.Permissions> | undefined,
-  permission: Discord.PermissionResolvable
-): boolean => {
-  if (typeof permissions !== "string" && permissions?.has(permission)) {
-    return true;
-  }
-  return false;
-};
-
-export const run = () => {
-  getEnvSocketAddresses(); // Sanity check TF2 servers set correctly in the .env file
-  setUpDataDirs();
-  loadChannels();
-
-  client.login(process.env.DISCORD_BOT_TOKEN);
-
-  client.once("ready", () => {
-    console.log("Ready!");
-  });
-
-  client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isCommand()) {
-      return;
-    }
-
-    const { commandName, channelId, user } = interaction;
-    const playerId = user.id;
-    const playerPermissions = interaction.member?.permissions;
-
-    switch (commandName) {
-      case Commands.Setup: {
-        if (
-          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
-        ) {
-          const mode = interaction.options.getString("mode") as GameMode;
-          const msg = setChannelGameMode(channelId, mode);
-          interaction.reply({ embeds: [getEmbed(msg)] });
-        } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
-        }
-        break;
-      }
-      case Commands.Start: {
-        const msg = startGame(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
-        break;
-      }
-      case Commands.Status: {
-        const msg = getStatus(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
-        break;
-      }
-      case Commands.Maps: {
-        const msg = listMaps(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
-        break;
-      }
-      case Commands.Stop: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
-          const msg = stopGame(channelId);
-          interaction.reply({ embeds: [getEmbed(msg)] });
-        } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
-        }
-        break;
-      }
-      case Commands.Add: {
-        const msgs = addPlayer(channelId, playerId);
-        handleMultiResponse(interaction, msgs);
-        break;
-      }
-      case Commands.Remove: {
-        const msgs = removePlayer(channelId, playerId);
-        handleMultiResponse(interaction, msgs);
-        break;
-      }
-      case Commands.Kick: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
-          const targetPlayer = interaction.options.getUser("user");
-          if (targetPlayer) {
-            const msgs = kickPlayer(channelId, targetPlayer.id);
-            handleMultiResponse(interaction, msgs);
-          } else {
-            interaction.reply({
-              embeds: [getEmbed(`Could not find player to kick.`)],
-            });
-          }
-        } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
-        }
-        break;
-      }
-      case Commands.Ready: {
-        const minutesIn = interaction.options.getNumber("minutes");
-        const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
-        const msg = readyPlayer(channelId, playerId, readyFor);
-        interaction.reply({ embeds: [getEmbed(msg)] });
-        break;
-      }
-      case Commands.Vacate: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
-          // Send the user button options asking which server to vacate from.
-
-          await interaction.deferReply({ ephemeral: true });
-
-          const row = new MessageActionRow();
-          const socketAddresses = getEnvSocketAddresses();
-          for (const socketAddress of socketAddresses) {
-            const details = await getServerDetails(socketAddress);
-            row.addComponents(
-              new MessageButton()
-                .setCustomId(`${VACATE_BUTTON_PREFIX}${socketAddress}`)
-                .setLabel(
-                  `${
-                    details?.name ?? "unknown"
-                  } (${socketAddress}). No. connected: ${
-                    details?.numPlayers ?? "unknown"
-                  }. Map: ${details?.map ?? "unknown"}.`
-                )
-                .setStyle("DANGER")
-            );
-          }
-
-          interaction.editReply({
-            embeds: [
-              getEmbed(
-                "Please click the server you want to vacate. Make sure there is not a game currently happening on it!"
-              ),
-            ],
-            components: [row],
-          });
-        } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
-        }
-        break;
-      }
-      case Commands.MapVote: {
-        // Send map vote buttons privately to the user.
-        const canVoteStatus = getCanVote(channelId, playerId);
-
-        if (!canVoteStatus.isAllowed) {
-          interaction.reply(canVoteStatus.msg);
-          return;
-        }
-
-        const rows = getMapVoteButtons(channelId);
-        const embed = getEmbed("Please click the map you want to play.");
-
-        interaction.reply({
-          embeds: [embed],
-          components: rows,
-          ephemeral: true,
-        });
-
-        break;
-      }
-    }
-  });
-
-  client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) {
-      return;
-    }
-
-    const { customId, channelId, user } = interaction;
-    const playerId = user.id;
-    const playerPermissions = interaction.member?.permissions;
-
-    if (customId.includes(MAP_VOTE_PREFIX)) {
-      const map = customId.split(MAP_VOTE_PREFIX)[1];
-      const msg = mapVote(channelId, playerId, map);
-      interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
-    } else if (customId === READY_BUTTON) {
-      const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
-      interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
-    } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
-      if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
-        await interaction.deferReply();
-        const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
-        const msg = await vacate(socketAddress);
-        interaction.editReply({ content: msg });
-      } else {
-        interaction.reply({
-          embeds: [
-            getEmbed(
-              `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-            ),
-          ],
-          ephemeral: true,
-        });
-      }
-    }
-  });
 };
