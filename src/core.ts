@@ -1329,7 +1329,10 @@ const mapVote = (
   const game = getGame(channelId);
 
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
-  if (numVotes === gameModeToNumPlayers(game.mode)) {
+  if (
+    game.state === GameState.MapVote &&
+    numVotes === gameModeToNumPlayers(game.mode)
+  ) {
     if (game.mapVoteTimeout) {
       clearTimeout(game.mapVoteTimeout);
       updateGame({
