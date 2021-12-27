@@ -18,6 +18,51 @@ const Rcon: any = require("rcon");
 
 dotenv.config();
 
+// Data paths
+const BASE_PATH = `${__dirname}/../data`;
+const GAMES_PATH = `${BASE_PATH}/games`;
+const CHANNELS_PATH = `${BASE_PATH}/channels`;
+
+// Gamedig
+const GAME_ID = "tf2";
+
+// Timeout lengths
+const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
+const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
+const MIN_READY_FOR = 1000 * 60 * 5; // 5 min
+let READY_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
+let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
+
+const RCON_TIMEOUT = 5000;
+const MOCK_ASYNC_SLEEP_FOR = 500; // Used in testing for: looking for server, rcon commands etc
+const FIND_SERVER_ATTEMPTS = 60;
+const FIND_SERVER_INTERVAL = 5000;
+
+// Button ids and button prefixes
+const MAP_VOTE_PREFIX = "map-vote-";
+const VACATE_BUTTON_PREFIX = "vacate-";
+const READY_BUTTON = "ready";
+
+// Bot messages
+const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
+const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
+const NEW_GAME_STARTED = `New game started.`;
+const STARTING_FROM_ADD = `No game started. Starting one now.`;
+const GAME_ALREADY_STARTED = "A game has already been started.";
+const STOPPED_GAME = `Stopped game.`;
+const NO_PERMISSION_MSG = "You do not have permission to do this.";
+
+// Redux actions
+const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
+const CREATE_GAME = "CREATE_GAME";
+const REMOVE_GAME = "REMOVE_GAME";
+const UPDATE_GAME = "UPDATE_GAME";
+const ADD_PLAYER = "ADD_PLAYER";
+const REMOVE_PLAYER = "REMOVE_PLAYER";
+const REMOVE_PLAYERS = "REMOVE_PLAYERS";
+const READY_PLAYER = "READY_PLAYER";
+const PLAYER_MAP_VOTE = "PLAYER_MAP_VOTE";
+
 const client = new Discord.Client({ intents: [Intents.FLAGS.GUILDS] });
 
 export enum Commands {
@@ -90,16 +135,6 @@ type Channels = { [channelId: string]: Channel };
 
 type RootState = { games: Games; channels: Channels };
 
-const SET_CHANNEL_GAME_MODE = "SET_CHANNEL_GAME_MODE";
-const CREATE_GAME = "CREATE_GAME";
-const REMOVE_GAME = "REMOVE_GAME";
-const UPDATE_GAME = "UPDATE_GAME";
-const ADD_PLAYER = "ADD_PLAYER";
-const REMOVE_PLAYER = "REMOVE_PLAYER";
-const REMOVE_PLAYERS = "REMOVE_PLAYERS";
-const READY_PLAYER = "READY_PLAYER";
-const PLAYER_MAP_VOTE = "PLAYER_MAP_VOTE";
-
 type SetChannelGameMode = {
   type: typeof SET_CHANNEL_GAME_MODE;
   payload: { channelId: string; mode: GameMode };
@@ -157,35 +192,6 @@ type Action =
   | RemovePlayers
   | ReadyPlayer
   | PlayerMapVote;
-
-const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
-const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
-const MIN_READY_FOR = 1000 * 60 * 5; // 5 min
-let READY_TIMEOUT = 1000 * 60; // 60 seconds
-let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds
-
-const BASE_PATH = `${__dirname}/../data`;
-const GAMES_PATH = `${BASE_PATH}/games`;
-const CHANNELS_PATH = `${BASE_PATH}/channels`;
-
-const GAME_ID = "tf2";
-
-const RCON_TIMEOUT = 5000;
-const TEST_SLEEP_FOR = 500;
-const FIND_SERVER_ATTEMPTS = 60;
-const FIND_SERVER_INTERVAL = 5000;
-
-const MAP_VOTE_PREFIX = "map-vote-";
-const READY_BUTTON = "ready";
-const VACATE_BUTTON_PREFIX = "vacate-";
-
-const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
-const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
-const NEW_GAME_STARTED = `New game started.`;
-const STARTING_FROM_ADD = `No game started. Starting one now.`;
-const GAME_ALREADY_STARTED = "A game has already been started.";
-const STOPPED_GAME = `Stopped game.`;
-const NO_PERMISSION_MSG = "You do not have permission to do this.";
 
 const getIsTestMode = () => process.env.TEST_MODE === "true";
 
@@ -973,7 +979,7 @@ const findAvailableServer = async (): Promise<Server | null> => {
 
   if (getIsTestMode()) {
     console.log("Not attempting to find a server as we are in test mode.");
-    await sleep(TEST_SLEEP_FOR);
+    await sleep(MOCK_ASYNC_SLEEP_FOR);
     return { name: "test-server", socketAddress: "127.0.0.1:27015" };
   }
 
@@ -997,7 +1003,7 @@ const setMapOnServer = async (
   // Send rcon command to change the map on the server
   if (getIsTestMode()) {
     console.log("Not setting map on server as we are in test mode.");
-    await sleep(TEST_SLEEP_FOR);
+    await sleep(MOCK_ASYNC_SLEEP_FOR);
     return "Not setting map on server as we are in test mode.";
   }
 
@@ -1065,7 +1071,7 @@ const vacate = async (socketAddress: string): Promise<string> => {
 
   if (getIsTestMode()) {
     console.log("Not vacating as we are in test mode.");
-    await sleep(TEST_SLEEP_FOR);
+    await sleep(MOCK_ASYNC_SLEEP_FOR);
     return "Not vacating as we are in test mode.";
   }
 
@@ -1867,7 +1873,7 @@ export const test = async () => {
     assert(stopGame(testChannel1) === "Can't stop the game now.");
 
     // Wait for async work to complete (looking for server + setting map)
-    await sleep(TEST_SLEEP_FOR * 3);
+    await sleep(MOCK_ASYNC_SLEEP_FOR * 3);
 
     // Game should now be cleared for testChannel1
     assert(store.getState().games[testChannel1] === undefined);
