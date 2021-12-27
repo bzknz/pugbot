@@ -30,7 +30,7 @@ export enum Commands {
   Kick = "kick",
   Vacate = "vacate",
   Ready = "ready",
-  MapVote = "vote-map",
+  MapVote = "vote",
   Stop = "stop",
   ClearAFKs = "clear-afks",
 }
