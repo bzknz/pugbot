@@ -1033,7 +1033,9 @@ const setMapOnServer = async (
         conn.send(command);
       })
       .on("response", (str: string) => {
-        const msg = str ? "Set map response:\n```" + str + "```" : null;
+        const msg = str
+          ? `Set map response (${socketAddress}):` + "\n```\n" + str + "```"
+          : null;
         console.log(msg);
         msgs.push(msg);
         if (msgs.length === 2) {
@@ -1043,7 +1045,10 @@ const setMapOnServer = async (
       })
       .on("error", (err: string) => {
         const msg =
-          "Error:\n```" + `${err ? err : "No error message."}` + "```";
+          `Set map error (${socketAddress}):` +
+          "\n```\n" +
+          `${err ? err : "No error message."}` +
+          "```";
         console.log(msg);
         msgs.push(msg);
         resolveHandler();
@@ -1090,7 +1095,7 @@ const vacate = async (socketAddress: string): Promise<Msg[]> => {
         toResolve
           ? [toResolve]
           : [
-              "Looks like no players were kicked as no players were on the server.",
+              `Vacate response (\`${socketAddress}\`):\nLooks like no players were kicked as no players were connected.`,
             ]
       );
     };
@@ -1102,7 +1107,9 @@ const vacate = async (socketAddress: string): Promise<Msg[]> => {
         conn.send("kickall");
       })
       .on("response", (str: string) => {
-        const msg = str ? "Vacate response:\n```" + str + "```" : null;
+        const msg = str
+          ? `Vacate response (${socketAddress}):` + "\n```\n" + str + "```"
+          : null;
         console.log(msg);
         msgs.push(msg);
         if (msgs.length === 2) {
@@ -1111,7 +1118,11 @@ const vacate = async (socketAddress: string): Promise<Msg[]> => {
         }
       })
       .on("error", (err: string) => {
-        const msg = "Error:\n```" + `${err ? err : "No error message"}` + "```";
+        const msg =
+          `Vacate error (${socketAddress}):` +
+          "\n```\n" +
+          `${err ? err : "No error message"}` +
+          "```";
         console.log(msg);
         msgs.push(msg);
         resolveHandler();
@@ -1551,9 +1562,7 @@ export const run = () => {
               new MessageButton()
                 .setCustomId(`${VACATE_BUTTON_PREFIX}${socketAddress}`)
                 .setLabel(
-                  `${
-                    details?.name ?? "unknown"
-                  } (${socketAddress}). No. connected: ${
+                  `${details?.name ?? "unknown"} (${socketAddress}). Players: ${
                     details?.numPlayers ?? "unknown"
                   }. Map: ${details?.map ?? "unknown"}.`
                 )
