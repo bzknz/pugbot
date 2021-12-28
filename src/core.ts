@@ -33,6 +33,7 @@ let READY_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 
 const RCON_TIMEOUT = 5000;
+const RCON_DISCONNECT_AFTER = 5000;
 const MOCK_ASYNC_SLEEP_FOR = 500; // Used in testing for: looking for server, rcon commands etc
 const FIND_SERVER_ATTEMPTS = 60;
 const FIND_SERVER_INTERVAL = 5000;
@@ -1044,6 +1045,9 @@ const setMapOnServer = async (
         const command = `changelevel ${map}`;
         console.log(command);
         conn.send(command);
+        setTimeout(() => {
+          conn.disconnect();
+        }, RCON_DISCONNECT_AFTER);
       })
       .on("response", (str: string) => {
         const msg = str
@@ -1118,6 +1122,9 @@ const vacate = async (socketAddress: string): Promise<Msg[]> => {
         console.log("Authenticated");
         console.log("Sending command: kickall");
         conn.send("kickall");
+        setTimeout(() => {
+          conn.disconnect();
+        }, RCON_DISCONNECT_AFTER);
       })
       .on("response", (str: string) => {
         const msg = str
