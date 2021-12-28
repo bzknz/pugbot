@@ -367,10 +367,10 @@ const sendMsg = async (
   channelId: string,
   embedText: string,
   mainText?: string
-) => {
+): Promise<Discord.Message<boolean> | null> => {
   if (getIsTestMode()) {
     console.log(channelId, embedText, mainText);
-    return;
+    return null;
   }
   // Send message on Discord
   // console.log(`${channelId}: ${embedText}`);
@@ -382,7 +382,10 @@ const sendMsg = async (
   }
 
   if (channel?.isText()) {
-    channel.send(msgObj);
+    return channel.send(msgObj);
+  } else {
+    console.error(`channel ${channelId} is not a text channel.`);
+    return null;
   }
 };
 
@@ -554,6 +557,7 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
   const player: Player = {
     id: playerId,
     queuedAt: timestamp,
+    // readyUntil: game.mode === GameMode.Test ? timestamp - 1 : timestamp + DEFAULT_READY_FOR, // Force a ready from the one when using the test game mode
     readyUntil: timestamp + DEFAULT_READY_FOR,
     mapVote: null,
   };
@@ -733,7 +737,10 @@ const startMapVote = (channelId: string) => {
     });
   }
 
-  sendMsg(channelId, `All players are ready.`);
+  // Push to the end of the call stack (send after last player add response)
+  setTimeout(async () => {
+    await sendMsg(channelId, `All players are ready.`);
+  });
 
   const maps = getGameModeMaps(existingGame.mode);
 
@@ -746,10 +753,12 @@ const startMapVote = (channelId: string) => {
       const game = getGame(channelId);
       const players = getPlayers(game);
       const numVotes = players.filter((p) => p.mapVote).length;
+
       sendMsg(
         channelId,
         `${numVotes}/${players.length} players voted within the time limit.`
       );
+
       mapVoteComplete(channelId);
     }, MAP_VOTE_TIMEOUT);
 
@@ -775,12 +784,15 @@ const startMapVote = (channelId: string) => {
 
     const channel = getDiscordChannel(channelId);
     if (channel?.isText()) {
-      channel.send({
-        embeds: [embed],
-        components: rows,
-        content: `Vote now: ${players
-          .map((p) => mentionPlayer(p.id))
-          .join(" ")}`,
+      // Push to the end of the call stack (send after last player add response)
+      setTimeout(async () => {
+        await channel.send({
+          embeds: [embed],
+          components: rows,
+          content: `Vote now: ${players
+            .map((p) => mentionPlayer(p.id))
+            .join(" ")}`,
+        });
       });
     }
   }
@@ -1168,7 +1180,7 @@ const getMapVoteCounts = (channelId: string) => {
 };
 
 const mapVoteComplete = async (channelId: string) => {
-  const msgs = [];
+  const msgs: Msg[] = [];
   const existingGame = getGame(channelId);
   const maps = getGameModeMaps(existingGame.mode);
   let winningMap = maps[0]; // Use the first map by default
@@ -1193,7 +1205,7 @@ const mapVoteComplete = async (channelId: string) => {
       msgs.push(`:map: **${winningMap} was randomly selected as the winner.**`);
     } else {
       winningMap = withMaxVotes[0]; // Only one in the set of winning maps
-      msgs.push(`:map: **${winningMap} won with ${maxVoteCount} votes.**`);
+      msgs.push(`:map: **${winningMap}** won with ${maxVoteCount} vote(s).`);
     }
   }
 
@@ -1220,7 +1232,10 @@ const mapVoteComplete = async (channelId: string) => {
     )}min timeout])... An admin can \`/vacate\` to kick all players from a server.`
   );
 
-  sendMsg(channelId, msgs.join("\n"));
+  // Push to the end of the call stack
+  setTimeout(async () => {
+    await sendMsg(channelId, msgs.join("\n\n"));
+  });
 
   let server: null | Server = null;
   for (let x = 0; x < FIND_SERVER_ATTEMPTS; x++) {
@@ -1243,14 +1258,14 @@ const mapVoteComplete = async (channelId: string) => {
       },
     });
 
-    sendMsg(
+    await sendMsg(
       channelId,
       `:handshake: Found server: ${server.name} (${server.socketAddress}). Attempting to set the map to **${winningMap}**...`
     );
 
     const setMapStatus = await setMapOnServer(server.socketAddress, winningMap);
 
-    sendMsg(channelId, setMapStatus);
+    await sendMsg(channelId, setMapStatus);
 
     updateGame({
       type: UPDATE_GAME,
@@ -1264,22 +1279,26 @@ const mapVoteComplete = async (channelId: string) => {
     const game = getGame(channelId);
     const playerIds = getPlayers(game).map((p) => p.id);
 
+    // Don't await these sends (send at same time)
+    sendMsg(
+      channelId,
+      `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
+      `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
+    );
+
     for (const playerId of playerIds) {
       sendDM(
         playerId,
         `Your ${game.mode} PUG is ready. Please join the server at: steam://connect/${game.socketAddress}/games`
       );
     }
-
-    sendMsg(
-      channelId,
-      `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
-      `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
-    );
   } else {
+    const game = getGame(channelId);
+    const playerIds = getPlayers(game).map((p) => p.id);
     sendMsg(
       channelId,
-      `:exclamation: **Could not find an available server. If one is available, please connect now.**\nStopped game.`
+      `:exclamation: **Could not find an available server. If one is available, please connect now.**`,
+      `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
     );
   }
 
@@ -1356,7 +1375,9 @@ const mapVote = (
       });
     }
     // All players voted in the alloted time
-    sendMsg(channelId, `All players have voted.`);
+    setTimeout(async () => {
+      await sendMsg(channelId, `All players have voted.`);
+    });
     mapVoteComplete(channelId);
   }
 
