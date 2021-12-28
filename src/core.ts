@@ -580,7 +580,7 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
     } else {
       // Setup timeout if not all players ready up in time.
       const readyTimeout = setTimeout(() => {
-        // If this runs, remove the unready players
+        // If this runs (will be cancelled if all players ready up), remove the unready players.
         const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
         store.dispatch({
           type: REMOVE_PLAYERS,
@@ -741,6 +741,7 @@ const startMapVote = (channelId: string) => {
     // Special case for only one map (BBall)
     mapVoteComplete(channelId);
   } else {
+    // If not all players vote within the time limit, tally votes.
     const mapVoteTimeout = setTimeout(() => {
       const game = getGame(channelId);
       const players = getPlayers(game);
@@ -1342,7 +1343,6 @@ const mapVote = (
 
   // Notify users about player vote
   const game = getGame(channelId);
-
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
   if (
     game.state === GameState.MapVote &&
@@ -1411,30 +1411,55 @@ const hasPermission = (
   return false;
 };
 
-const handleCommandReply = (
+const joinMsgs = (msgs: Msg[]) => msgs.join(`\n`);
+
+const handleCommandReply = async (
   interaction: Discord.CommandInteraction<Discord.CacheType>,
   msgs: Msg[],
-  ephemeral = false
+  ephemeral = false,
+  components: Discord.MessageActionRow[] | undefined = undefined
 ) => {
-  const msg = msgs.join(`\n`);
-  interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
+  const msg = joinMsgs(msgs);
+  const reply: Discord.InteractionReplyOptions = {
+    embeds: [getEmbed(msg)],
+    ephemeral,
+  };
+  if (components) {
+    reply.components = components;
+  }
+  await interaction.reply(reply);
 };
 
-const handleButtonReply = (
+const handleEditCommandReply = async (
+  interaction: Discord.CommandInteraction<Discord.CacheType>,
+  msgs: Msg[],
+  components: Discord.MessageActionRow[] | undefined = undefined
+) => {
+  const msg = joinMsgs(msgs);
+  const reply: Discord.InteractionReplyOptions = {
+    embeds: [getEmbed(msg)],
+  };
+  if (components) {
+    reply.components = components;
+  }
+  await interaction.editReply(reply);
+};
+
+const handleButtonReply = async (
   interaction: Discord.ButtonInteraction<Discord.CacheType>,
   msgs: Msg[],
   ephemeral = false
 ) => {
-  const msg = msgs.join(`\n`);
-  interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
+  const msg = joinMsgs(msgs);
+  await interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
 };
 
-const handleButtonEditReply = (
+const handleEditButtonReply = async (
   interaction: Discord.ButtonInteraction<Discord.CacheType>,
   msgs: Msg[]
 ) => {
-  const msg = msgs.join(`\n`);
-  interaction.editReply({ embeds: [getEmbed(msg)] });
+  const msg = joinMsgs(msgs);
+  await interaction.editReply({ embeds: [getEmbed(msg)] });
 };
 
 export const run = () => {
@@ -1469,58 +1494,52 @@ export const run = () => {
         ) {
           const mode = interaction.options.getString("mode") as GameMode;
           const msgs = setGameMode(channelId, mode);
-          handleCommandReply(interaction, msgs);
+          await handleCommandReply(interaction, msgs);
         } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
+          await handleCommandReply(
+            interaction,
+            [`${NO_PERMISSION_MSG} You need the MANAGE_CHANNELS permission.`],
+            true
+          );
         }
         break;
       }
       case Commands.Start: {
         const msgs = startGame(channelId);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Status: {
         const msgs = getStatus(channelId);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Maps: {
         const msgs = listMaps(channelId);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Stop: {
         if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
           const msgs = stopGame(channelId);
-          handleCommandReply(interaction, msgs);
+          await handleCommandReply(interaction, msgs);
         } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
+          await handleCommandReply(
+            interaction,
+            [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
+            true
+          );
         }
         break;
       }
       case Commands.Add: {
         const msgs = addPlayer(channelId, playerId);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Remove: {
         const msgs = removePlayer(channelId, playerId);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Kick: {
@@ -1528,12 +1547,14 @@ export const run = () => {
           const targetPlayer = interaction.options.getUser("user");
           if (targetPlayer) {
             const msgs = kickPlayer(channelId, targetPlayer.id);
-            handleCommandReply(interaction, msgs);
+            await handleCommandReply(interaction, msgs);
           } else {
-            handleCommandReply(interaction, [`Could not find player to kick.`]);
+            await handleCommandReply(interaction, [
+              `Could not find player to kick.`,
+            ]);
           }
         } else {
-          handleCommandReply(
+          await handleCommandReply(
             interaction,
             [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
             true
@@ -1545,7 +1566,7 @@ export const run = () => {
         const minutesIn = interaction.options.getNumber("minutes");
         const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
         const msgs = readyPlayer(channelId, playerId, readyFor);
-        handleCommandReply(interaction, msgs);
+        await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Vacate: {
@@ -1570,23 +1591,20 @@ export const run = () => {
             );
           }
 
-          interaction.editReply({
-            embeds: [
-              getEmbed(
-                "Please click the server you want to vacate. Make sure there is not a game currently happening on it!"
-              ),
+          const components = [row];
+          await handleEditCommandReply(
+            interaction,
+            [
+              "Please click the server you want to vacate. Make sure there is not a game currently happening on it!",
             ],
-            components: [row],
-          });
+            components
+          );
         } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
+          await handleCommandReply(
+            interaction,
+            [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
+            true
+          );
         }
         break;
       }
@@ -1595,18 +1613,17 @@ export const run = () => {
         const canVoteStatus = getCanVote(channelId, playerId);
 
         if (!canVoteStatus.isAllowed) {
-          interaction.reply({ content: canVoteStatus.msg, ephemeral: true });
+          await handleCommandReply(interaction, [canVoteStatus.msg], true);
           return;
         }
 
-        const rows = getMapVoteButtons(channelId);
-        const embed = getEmbed("Please click the map you want to play.");
-
-        interaction.reply({
-          embeds: [embed],
-          components: rows,
-          ephemeral: true,
-        });
+        const components = getMapVoteButtons(channelId);
+        await handleCommandReply(
+          interaction,
+          ["Please click the map you want to play."],
+          true,
+          components
+        );
 
         break;
       }
@@ -1631,18 +1648,18 @@ export const run = () => {
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
       const msgs = mapVote(channelId, playerId, map);
-      handleButtonReply(interaction, msgs, true);
+      await handleButtonReply(interaction, msgs, true);
     } else if (customId === READY_BUTTON) {
       const msgs = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
-      handleButtonReply(interaction, msgs, true);
+      await handleButtonReply(interaction, msgs, true);
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
       if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
         const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
         const msgs = await vacate(socketAddress);
-        handleButtonEditReply(interaction, msgs);
+        await handleEditButtonReply(interaction, msgs);
       } else {
-        handleButtonReply(
+        await handleButtonReply(
           interaction,
           [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
           true
