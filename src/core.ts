@@ -47,7 +47,6 @@ const READY_BUTTON = "ready";
 const CHANNEL_NOT_SET_UP = `This channel has not been set up.`;
 const NO_GAME_STARTED = `No game started. Use \`/start\` or \`/add\` to start one.`;
 const NEW_GAME_STARTED = `New game started.`;
-const STARTING_FROM_ADD = `No game started. Starting one now.`;
 const GAME_ALREADY_STARTED = "A game has already been started.";
 const STOPPED_GAME = `Stopped game.`;
 const NO_PERMISSION_MSG = "You do not have permission to do this.";
@@ -523,7 +522,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
 
   const game = getGame(channelId);
   if (!game) {
-    const msgs = [STARTING_FROM_ADD];
+    const msgs = [];
     msgs.push(startGame(channelId));
     msgs.push(...addPlayer(channelId, playerId));
     return msgs;
@@ -767,7 +766,7 @@ const startMapVote = (channelId: string) => {
     const game = getGame(channelId);
     const players = getPlayers(game);
     const embed = getEmbed(
-      `:ballot_box: Map vote starting now. Please click the map you want to play. Waiting ${
+      `:ballot_box: Map vote starting now. Click the map you want to play (click another to change your vote). Waiting ${
         MAP_VOTE_TIMEOUT / 1000
       } seconds for votes.`
     );
@@ -1034,7 +1033,7 @@ const setMapOnServer = async (
         const msg = str ? "Set map response:\n```" + str + "```" : null;
         console.log(msg);
         msgs.push(msg);
-        if (msgs.length == 2) {
+        if (msgs.length === 2) {
           // Auth and response from kick command
           resolveHandler();
         }
@@ -1101,7 +1100,7 @@ const vacate = async (socketAddress: string): Promise<string> => {
         const msg = str ? "Vacate response:\n```" + str + "```" : null;
         console.log(msg);
         msgs.push(msg);
-        if (msgs.length == 2) {
+        if (msgs.length === 2) {
           // Auth and response from kick command
           resolveHandler();
         }
@@ -1690,7 +1689,6 @@ export const test = async () => {
 
     // Start a game with /add
     assert.deepEqual(addPlayer(testChannel1, `1`), [
-      STARTING_FROM_ADD,
       NEW_GAME_STARTED,
       `Added: <@1>`,
       `Status (1/12): <@1>:ballot_box_with_check: `,
@@ -1905,7 +1903,6 @@ export const test = async () => {
   const testReadyTimeout = async () => {
     // Start a second game by adding a player to test ready up timeout
     assert.deepEqual(addPlayer(testChannel1, `1`), [
-      STARTING_FROM_ADD,
       NEW_GAME_STARTED,
       `Added: <@1>`,
       getStatus(testChannel1),
