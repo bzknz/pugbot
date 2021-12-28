@@ -10,9 +10,8 @@ import Discord, {
 import dotenv from "dotenv";
 import fs from "fs";
 import Gamedig from "gamedig";
-import path from "path";
 import { createStore } from "redux";
-import { filterObjectByKeys } from "./utils";
+import { filterObjectByKeys, orderRecentFiles } from "./utils";
 
 const Rcon: any = require("rcon");
 
@@ -191,6 +190,8 @@ type Action =
   | RemovePlayers
   | ReadyPlayer
   | PlayerMapVote;
+
+type Msg = string;
 
 const getIsTestMode = () => process.env.TEST_MODE === "true";
 
@@ -428,13 +429,13 @@ const loadChannels = () => {
   }
 };
 
-const setChannelGameMode = (channelId: string, mode: GameMode): string => {
+const setGameMode = (channelId: string, mode: GameMode): Msg[] => {
   store.dispatch({
     type: SET_CHANNEL_GAME_MODE,
     payload: { channelId, mode },
   });
   saveChannelGameMode(channelId, mode);
-  return `Game mode set to ${mode}.`;
+  return [`Game mode set to ${mode}.`];
 };
 
 const getChannel = (channelId: string) => {
@@ -452,15 +453,15 @@ const checkPlayerAdded = (channelId: string, playerId: string) => {
   return !!game.players[playerId];
 };
 
-const startGame = (channelId: string): string => {
+const startGame = (channelId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
-    return CHANNEL_NOT_SET_UP;
+    return [CHANNEL_NOT_SET_UP];
   }
 
   const isExisting = !!getGame(channelId);
   if (isExisting) {
-    return GAME_ALREADY_STARTED;
+    return [GAME_ALREADY_STARTED];
   }
 
   const channelType = channel.mode;
@@ -483,30 +484,30 @@ const startGame = (channelId: string): string => {
   };
 
   store.dispatch({ type: CREATE_GAME, payload: game });
-  return NEW_GAME_STARTED;
+  return [NEW_GAME_STARTED];
 };
 
 const updateGame = (action: UpdateGame) => {
   store.dispatch(action);
 };
 
-const stopGame = (channelId: string): string => {
+const stopGame = (channelId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
-    return CHANNEL_NOT_SET_UP;
+    return [CHANNEL_NOT_SET_UP];
   }
 
   const game = getGame(channelId);
   if (!game) {
-    return NO_GAME_STARTED;
+    return [NO_GAME_STARTED];
   }
 
   if (game.state !== GameState.AddRemove) {
-    return "Can't stop the game now.";
+    return ["Can't stop the game now."];
   }
 
   store.dispatch({ type: REMOVE_GAME, payload: channelId });
-  return STOPPED_GAME;
+  return [STOPPED_GAME];
 };
 
 const getGameModeMaps = (mode: GameMode) => {
@@ -514,7 +515,7 @@ const getGameModeMaps = (mode: GameMode) => {
   return maps[mode];
 };
 
-const addPlayer = (channelId: string, playerId: string): string[] => {
+const addPlayer = (channelId: string, playerId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
     return [CHANNEL_NOT_SET_UP];
@@ -523,7 +524,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
   const game = getGame(channelId);
   if (!game) {
     const msgs = [];
-    msgs.push(startGame(channelId));
+    msgs.push(...startGame(channelId));
     msgs.push(...addPlayer(channelId, playerId));
     return msgs;
   }
@@ -562,7 +563,7 @@ const addPlayer = (channelId: string, playerId: string): string[] => {
     payload: { channelId, player },
   });
 
-  const msgs = [`Added: ${mentionPlayer(playerId)}`, getStatus(channelId)];
+  const msgs = [`Added: ${mentionPlayer(playerId)}`, ...getStatus(channelId)];
 
   if (nextNumPlayers === totalPlayers) {
     updateGame({
@@ -784,7 +785,7 @@ const startMapVote = (channelId: string) => {
   }
 };
 
-const removePlayer = (channelId: string, playerId: string): string[] => {
+const removePlayer = (channelId: string, playerId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
     return [CHANNEL_NOT_SET_UP];
@@ -825,7 +826,7 @@ const removePlayer = (channelId: string, playerId: string): string[] => {
   }
 
   msgs.push(`Removed: ${mentionPlayer(playerId)}`);
-  msgs.push(getStatus(channelId));
+  msgs.push(...getStatus(channelId));
   return msgs;
 };
 
@@ -833,15 +834,15 @@ const kickPlayer = (channelId: string, playerId: string) => {
   return removePlayer(channelId, playerId);
 };
 
-const getStatus = (channelId: string): string => {
+const getStatus = (channelId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
-    return CHANNEL_NOT_SET_UP;
+    return [CHANNEL_NOT_SET_UP];
   }
 
   const existingGame = getGame(channelId);
   if (!existingGame) {
-    return NO_GAME_STARTED;
+    return [NO_GAME_STARTED];
   }
 
   const game = getGame(channelId);
@@ -849,49 +850,49 @@ const getStatus = (channelId: string): string => {
   const numPlayers = players.length;
   const totalPlayers = gameModeToNumPlayers(game.mode);
 
-  let out = `Status (${numPlayers}/${totalPlayers}): `;
+  let msg = `Status (${numPlayers}/${totalPlayers}): `;
   if (players.length === 0) {
-    out += "Empty";
+    msg += "Empty";
   } else {
     const now = Date.now();
     for (const player of players) {
-      out += `${mentionPlayer(player.id)}`;
+      msg += `${mentionPlayer(player.id)}`;
       const isReady = isPlayerReady(now, player.readyUntil);
       if (isReady) {
-        out += `:ballot_box_with_check: `;
+        msg += `:ballot_box_with_check: `;
       } else {
-        out += `:zzz: `;
+        msg += `:zzz: `;
       }
     }
   }
-  return out;
+  return [msg];
 };
 
 const readyPlayer = (
   channelId: string,
   playerId: string,
   time: number
-): string => {
+): Msg[] => {
   // Ready the player up and then check if all players are ready
   const channel = getChannel(channelId);
   if (!channel) {
-    return CHANNEL_NOT_SET_UP;
+    return [CHANNEL_NOT_SET_UP];
   }
 
   const existingGame = getGame(channelId);
   if (!existingGame) {
-    return NO_GAME_STARTED;
+    return [NO_GAME_STARTED];
   }
 
   if (
     ![GameState.AddRemove, GameState.ReadyCheck].includes(existingGame.state)
   ) {
-    return `Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`;
+    return [`Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`];
   }
 
   const isAdded = checkPlayerAdded(channelId, playerId);
   if (!isAdded) {
-    return `${mentionPlayer(playerId)} is not added. Ignoring.`;
+    return [`${mentionPlayer(playerId)} is not added. Ignoring.`];
   }
 
   const now = Date.now();
@@ -918,9 +919,11 @@ const readyPlayer = (
   ) {
     startMapVote(channelId);
   }
-  return `${mentionPlayer(playerId)} is ready for ${Math.round(
-    normalizedTime / 1000 / 60
-  )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`;
+  return [
+    `${mentionPlayer(playerId)} is ready for ${Math.round(
+      normalizedTime / 1000 / 60
+    )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`,
+  ];
 };
 
 const sleep = (ms: number) => {
@@ -1065,28 +1068,30 @@ const setMapOnServer = async (
   return msg;
 };
 
-const vacate = async (socketAddress: string): Promise<string> => {
+const vacate = async (socketAddress: string): Promise<Msg[]> => {
   // Send rcon command to kick players from the server
 
   if (getIsTestMode()) {
     console.log("Not vacating as we are in test mode.");
     await sleep(MOCK_ASYNC_SLEEP_FOR);
-    return "Not vacating as we are in test mode.";
+    return ["Not vacating as we are in test mode."];
   }
 
   const { ip, port } = splitSocketAddress(socketAddress);
   const password = process.env.RCON_PASSWORD;
   const conn = new Rcon(ip, port, password);
 
-  const vacatePromise: Promise<string> = new Promise((resolve) => {
+  const vacatePromise: Promise<Msg[]> = new Promise((resolve) => {
     const msgs: (null | string)[] = [];
 
     const resolveHandler = () => {
       const toResolve = msgs.filter((m) => m).join("\n");
       resolve(
         toResolve
-          ? toResolve
-          : "Looks like no players were kicked as no players were on the server."
+          ? [toResolve]
+          : [
+              "Looks like no players were kicked as no players were on the server.",
+            ]
       );
     };
 
@@ -1121,9 +1126,9 @@ const vacate = async (socketAddress: string): Promise<string> => {
 
   conn.connect();
 
-  const timeoutPromise: Promise<string> = new Promise((resolve) => {
+  const timeoutPromise: Promise<Msg[]> = new Promise((resolve) => {
     sleep(RCON_TIMEOUT).then(() => {
-      resolve("Error: Timed out.");
+      resolve(["Error: Timed out."]);
     });
   });
 
@@ -1312,11 +1317,11 @@ const mapVote = (
   channelId: string,
   playerId: string,
   mapVote: string
-): string => {
+): Msg[] => {
   const allowedStatus = getCanVote(channelId, playerId);
 
   if (!allowedStatus.isAllowed) {
-    return allowedStatus.msg;
+    return [allowedStatus.msg];
   }
 
   store.dispatch({
@@ -1344,7 +1349,7 @@ const mapVote = (
     mapVoteComplete(channelId);
   }
 
-  return `You voted for ${mapVote}.`;
+  return [`You voted for ${mapVote}.`];
 };
 
 const isPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
@@ -1372,35 +1377,18 @@ const getUnreadyPlayerIds = (
   return unreadyPlayerIds;
 };
 
-const listMaps = (channelId: string): string => {
+const listMaps = (channelId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
-    return CHANNEL_NOT_SET_UP;
+    return [CHANNEL_NOT_SET_UP];
   }
 
   const maps = getGameModeMaps(channel.mode);
 
-  return `Available maps for ${channel.mode}:\n${maps.join("\n")}`;
-};
-
-// https://brianchildress.co/find-latest-file-in-directory-in-nodejs/
-const orderRecentFiles = (dir: string) => {
-  return fs
-    .readdirSync(dir)
-    .filter((file) => fs.lstatSync(path.join(dir, file)).isFile())
-    .map((file) => ({ file, mtime: fs.lstatSync(path.join(dir, file)).mtime }))
-    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+  return [`Available maps for ${channel.mode}:\n${maps.join("\n")}`];
 };
 
 const getEmbed = (msg: string) => new MessageEmbed().setDescription(msg);
-
-const handleMultiResponse = (
-  interaction: Discord.CommandInteraction<Discord.CacheType>,
-  msgs: string[]
-) => {
-  const msg = msgs.join(`\n`);
-  interaction.reply({ embeds: [getEmbed(msg)] });
-};
 
 const hasPermission = (
   permissions: string | Readonly<Discord.Permissions> | undefined,
@@ -1412,8 +1400,38 @@ const hasPermission = (
   return false;
 };
 
+const handleCommandReply = (
+  interaction: Discord.CommandInteraction<Discord.CacheType>,
+  msgs: Msg[],
+  ephemeral = false
+) => {
+  const msg = msgs.join(`\n`);
+  interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
+};
+
+const handleButtonReply = (
+  interaction: Discord.ButtonInteraction<Discord.CacheType>,
+  msgs: Msg[],
+  ephemeral = false
+) => {
+  const msg = msgs.join(`\n`);
+  interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
+};
+
+const handleButtonEditReply = (
+  interaction: Discord.ButtonInteraction<Discord.CacheType>,
+  msgs: Msg[]
+) => {
+  const msg = msgs.join(`\n`);
+  interaction.editReply({ embeds: [getEmbed(msg)] });
+};
+
 export const run = () => {
-  getEnvSocketAddresses(); // Sanity check TF2 servers set correctly in the .env file
+  assert(getEnvSocketAddresses().length > 0); // Check TF2 servers set correctly in the .env file
+  // Check maps file is correct
+  for (const mode of Object.values(GameMode)) {
+    assert(getGameModeMaps(mode).length > 0);
+  }
   setUpDataDirs();
   loadChannels();
 
@@ -1423,6 +1441,7 @@ export const run = () => {
     console.log("Ready!");
   });
 
+  // Handle slash command actions
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand()) {
       return;
@@ -1438,8 +1457,8 @@ export const run = () => {
           hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
         ) {
           const mode = interaction.options.getString("mode") as GameMode;
-          const msg = setChannelGameMode(channelId, mode);
-          interaction.reply({ embeds: [getEmbed(msg)] });
+          const msgs = setGameMode(channelId, mode);
+          handleCommandReply(interaction, msgs);
         } else {
           interaction.reply({
             embeds: [
@@ -1453,24 +1472,24 @@ export const run = () => {
         break;
       }
       case Commands.Start: {
-        const msg = startGame(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        const msgs = startGame(channelId);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Status: {
-        const msg = getStatus(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        const msgs = getStatus(channelId);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Maps: {
-        const msg = listMaps(channelId);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        const msgs = listMaps(channelId);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Stop: {
         if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
-          const msg = stopGame(channelId);
-          interaction.reply({ embeds: [getEmbed(msg)] });
+          const msgs = stopGame(channelId);
+          handleCommandReply(interaction, msgs);
         } else {
           interaction.reply({
             embeds: [
@@ -1485,12 +1504,12 @@ export const run = () => {
       }
       case Commands.Add: {
         const msgs = addPlayer(channelId, playerId);
-        handleMultiResponse(interaction, msgs);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Remove: {
         const msgs = removePlayer(channelId, playerId);
-        handleMultiResponse(interaction, msgs);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Kick: {
@@ -1498,29 +1517,24 @@ export const run = () => {
           const targetPlayer = interaction.options.getUser("user");
           if (targetPlayer) {
             const msgs = kickPlayer(channelId, targetPlayer.id);
-            handleMultiResponse(interaction, msgs);
+            handleCommandReply(interaction, msgs);
           } else {
-            interaction.reply({
-              embeds: [getEmbed(`Could not find player to kick.`)],
-            });
+            handleCommandReply(interaction, [`Could not find player to kick.`]);
           }
         } else {
-          interaction.reply({
-            embeds: [
-              getEmbed(
-                `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-              ),
-            ],
-            ephemeral: true,
-          });
+          handleCommandReply(
+            interaction,
+            [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
+            true
+          );
         }
         break;
       }
       case Commands.Ready: {
         const minutesIn = interaction.options.getNumber("minutes");
         const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
-        const msg = readyPlayer(channelId, playerId, readyFor);
-        interaction.reply({ embeds: [getEmbed(msg)] });
+        const msgs = readyPlayer(channelId, playerId, readyFor);
+        handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Vacate: {
@@ -1588,13 +1602,14 @@ export const run = () => {
         break;
       }
       // case Commands.ClearAFKs: {
-      //   const msg = clearAFKs(channelId);
-      //   interaction.reply({ embeds: [getEmbed(msg)] });
+      //   const msgs = clearAFKs(channelId);
+      //   handleReply(interaction, msgs);
       //   break;
       // }
     }
   });
 
+  // Handle button actions
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) {
       return;
@@ -1606,26 +1621,23 @@ export const run = () => {
 
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
-      const msg = mapVote(channelId, playerId, map);
-      interaction.reply({ ephemeral: true, embeds: [getEmbed(msg)] });
+      const msgs = mapVote(channelId, playerId, map);
+      handleButtonReply(interaction, msgs, true);
     } else if (customId === READY_BUTTON) {
-      const msg = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
-      interaction.reply({ embeds: [getEmbed(msg)], ephemeral: true });
+      const msgs = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
+      handleButtonReply(interaction, msgs, true);
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
       if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
         const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
-        const msg = await vacate(socketAddress);
-        interaction.editReply({ content: msg });
+        const msgs = await vacate(socketAddress);
+        handleButtonEditReply(interaction, msgs);
       } else {
-        interaction.reply({
-          embeds: [
-            getEmbed(
-              `${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`
-            ),
-          ],
-          ephemeral: true,
-        });
+        handleButtonReply(
+          interaction,
+          [`${NO_PERMISSION_MSG} You need the MANAGE_ROLES permission.`],
+          true
+        );
       }
     }
   });
@@ -1654,133 +1666,127 @@ export const test = async () => {
 
   const testGame = async () => {
     // Test invalid commands when channel is not set up
-    assert(startGame(testChannel1) === CHANNEL_NOT_SET_UP);
-    assert.deepEqual(addPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
-    assert.deepEqual(removePlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === CHANNEL_NOT_SET_UP
-    );
-    assert(mapVote(testChannel1, `invalid`, testMap1) === CHANNEL_NOT_SET_UP);
-    assert(stopGame(testChannel1) === CHANNEL_NOT_SET_UP);
-    assert(getStatus(testChannel1) === CHANNEL_NOT_SET_UP);
-    assert(listMaps(testChannel1) === CHANNEL_NOT_SET_UP);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(startGame(testChannel1), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(removePlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      CHANNEL_NOT_SET_UP,
+    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      CHANNEL_NOT_SET_UP,
+    ]);
+    assert.deepEqual(stopGame(testChannel1), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(getStatus(testChannel1), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(listMaps(testChannel1), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
 
     // Setup channel
-    assert(
-      setChannelGameMode(testChannel1, GameMode.Sixes) ===
-        `Game mode set to SIXES.`
-    );
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Sixes), [
+      "Game mode set to SIXES.",
+    ]);
 
     // Test invalid commands when channel set up but no game started
-    assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
-    assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED
-    );
-    assert(stopGame(testChannel1) === NO_GAME_STARTED);
-    assert(getStatus(testChannel1) === NO_GAME_STARTED);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      NO_GAME_STARTED,
+    ]);
+    assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      NO_GAME_STARTED,
+    ]);
+    assert.deepEqual(stopGame(testChannel1), [NO_GAME_STARTED]);
+    assert.deepEqual(getStatus(testChannel1), [NO_GAME_STARTED]);
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
-    assert(
-      listMaps(testChannel1) ===
-        `Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx`
-    );
+    assert.deepEqual(listMaps(testChannel1), [
+      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx",
+    ]);
 
     // Start a game with /add
-    assert.deepEqual(addPlayer(testChannel1, `1`), [
+    assert.deepEqual(addPlayer(testChannel1, "1"), [
       NEW_GAME_STARTED,
-      `Added: <@1>`,
-      `Status (1/12): <@1>:ballot_box_with_check: `,
+      "Added: <@1>",
+      "Status (1/12): <@1>:ballot_box_with_check: ",
     ]);
 
     // Stop the game
-    assert(stopGame(testChannel1) === STOPPED_GAME);
+    assert.deepEqual(stopGame(testChannel1), [STOPPED_GAME]);
 
     // Change channel type
-    assert(
-      setChannelGameMode(testChannel1, GameMode.BBall) ===
-        `Game mode set to BBALL.`
-    );
-    assert(
-      setChannelGameMode(testChannel1, GameMode.Ultiduo) ===
-        `Game mode set to ULTIDUO.`
-    );
-    assert(
-      setChannelGameMode(testChannel1, GameMode.Highlander) ===
-        `Game mode set to HIGHLANDER.`
-    );
-    assert(
-      setChannelGameMode(testChannel1, GameMode.Test) ===
-        `Game mode set to TEST.`
-    );
-    assert(
-      setChannelGameMode(testChannel1, GameMode.Sixes) ===
-        `Game mode set to SIXES.`
-    );
+    assert.deepEqual(setGameMode(testChannel1, GameMode.BBall), [
+      "Game mode set to BBALL.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Ultiduo), [
+      "Game mode set to ULTIDUO.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Highlander), [
+      "Game mode set to HIGHLANDER.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Test), [
+      "Game mode set to TEST.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Sixes), [
+      "Game mode set to SIXES.",
+    ]);
 
     // Start game
-    assert(startGame(testChannel1) === NEW_GAME_STARTED);
+    assert.deepEqual(startGame(testChannel1), [NEW_GAME_STARTED]);
 
     // Empty game status
-    assert(getStatus(testChannel1) === "Status (0/12): Empty");
+    assert.deepEqual(getStatus(testChannel1), ["Status (0/12): Empty"]);
 
     // Test invalid commands right after new game started
-    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-    assert(
-      mapVote(testChannel1, `invalid`, testMap1) ===
-        `You are not added. Ignoring vote.`
-    );
-    assert.deepEqual(removePlayer(testChannel1, `1`), [
-      `<@1> is not added. Ignoring.`,
+    assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      "You are not added. Ignoring vote.",
     ]);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [
-      `<@1> is not added. Ignoring.`,
+    assert.deepEqual(removePlayer(testChannel1, "1"), [
+      "<@1> is not added. Ignoring.",
     ]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-        "<@1> is not added. Ignoring."
-    );
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [
+      "<@1> is not added. Ignoring.",
+    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      "<@1> is not added. Ignoring.",
+    ]);
 
     // Add 11 Status (not full)
     for (let x = 0; x < 11; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
-        getStatus(testChannel1),
+        ...getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
 
     // Check status
-    assert(
-      getStatus(testChannel1) ===
-        "Status (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: "
-    );
+    assert.deepEqual(getStatus(testChannel1), [
+      "Status (11/12): <@1>:ballot_box_with_check: <@2>:ballot_box_with_check: <@3>:ballot_box_with_check: <@4>:ballot_box_with_check: <@5>:ballot_box_with_check: <@6>:ballot_box_with_check: <@7>:ballot_box_with_check: <@8>:ballot_box_with_check: <@9>:ballot_box_with_check: <@10>:ballot_box_with_check: <@11>:ballot_box_with_check: ",
+    ]);
 
     // Ready player 11
     assert(
-      readyPlayer(testChannel1, "11", DEFAULT_READY_FOR).includes(
+      readyPlayer(testChannel1, "11", DEFAULT_READY_FOR)[0].includes(
         "<@11> is ready for 10min (until "
       )
     );
 
     // Test ready player that is not added
     assert(
-      readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR).includes(
-        `<@invalid> is not added. Ignoring.`
+      readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR)[0].includes(
+        "<@invalid> is not added. Ignoring."
       )
     );
 
     // Try add player again
-    assert.deepEqual(addPlayer(testChannel1, `1`), [
-      `<@1> is already added. Ignoring.`,
+    assert.deepEqual(addPlayer(testChannel1, "1"), [
+      "<@1> is already added. Ignoring.",
     ]);
 
     // Remove all 11 players
     for (let x = 0; x < 11; x++) {
       assert.deepEqual(removePlayer(testChannel1, `${x + 1}`), [
         `Removed: <@${x + 1}>`,
-        getStatus(testChannel1),
+        ...getStatus(testChannel1),
       ]);
     }
 
@@ -1788,15 +1794,15 @@ export const test = async () => {
     for (let x = 0; x < 11; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
-        getStatus(testChannel1),
+        ...getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
 
-    assert.deepEqual(addPlayer(testChannel1, `12`), [
-      `Added: <@12>`,
-      getStatus(testChannel1),
-      `The game is full.`,
+    assert.deepEqual(addPlayer(testChannel1, "12"), [
+      "Added: <@12>",
+      ...getStatus(testChannel1),
+      "The game is full.",
     ]);
 
     // Check in map vote state
@@ -1804,32 +1810,30 @@ export const test = async () => {
     assert(store.getState().games[testChannel1].state === GameState.MapVote);
 
     // Test invalid actions when in map vote state
-    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-    assert.deepEqual(addPlayer(testChannel1, `1`), [
-      `Can't add <@1> right now. Ignoring.`,
+    assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), [
+      "Can't add <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(removePlayer(testChannel1, `1`), [
-      `Can't remove <@1> right now. Ignoring.`,
+    assert.deepEqual(removePlayer(testChannel1, "1"), [
+      "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [
-      `Can't remove <@1> right now. Ignoring.`,
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [
+      "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-        `Can't ready <@1> right now. Ignoring.`
-    );
-    assert(
-      mapVote(testChannel1, `invalid`, testMap1) ===
-        `You are not added. Ignoring vote.`
-    );
-    assert(stopGame(testChannel1) === "Can't stop the game now.");
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      "Can't ready <@1> right now. Ignoring.",
+    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      "You are not added. Ignoring vote.",
+    ]);
+    assert.deepEqual(stopGame(testChannel1), ["Can't stop the game now."]);
 
     // Players vote for one of three maps (even distribution)
     for (let x = 0; x < 12; x++) {
       const map = x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3;
-      assert(
-        mapVote(testChannel1, `${x + 1}`, map) === `You voted for ${map}.`
-      );
+      assert.deepEqual(mapVote(testChannel1, `${x + 1}`, map), [
+        `You voted for ${map}.`,
+      ]);
     }
 
     // Check the winning map one of the three test maps (should be randomly selected)
@@ -1848,30 +1852,26 @@ export const test = async () => {
     // Now the bot should look for an available server and set the map on the server
 
     // Check invalid commands when looking for server and setting map
-    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-    assert.deepEqual(addPlayer(testChannel1, `1`), [
-      `Can't add <@1> right now. Ignoring.`,
+    assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), [
+      "Can't add <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(removePlayer(testChannel1, `1`), [
-      `Can't remove <@1> right now. Ignoring.`,
+    assert.deepEqual(removePlayer(testChannel1, "1"), [
+      "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [
-      `Can't remove <@1> right now. Ignoring.`,
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [
+      "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) ===
-        `Can't ready <@1> right now. Ignoring.`
-    );
-    console.log(mapVote(testChannel1, `invalid`, testMap1));
-    assert(
-      mapVote(testChannel1, `invalid`, testMap1) ===
-        `You are not added. Ignoring vote.`
-    );
-    assert(
-      mapVote(testChannel1, `1`, testMap1) ===
-        `You cannot vote now. Ignoring vote.`
-    );
-    assert(stopGame(testChannel1) === "Can't stop the game now.");
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      "Can't ready <@1> right now. Ignoring.",
+    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      "You are not added. Ignoring vote.",
+    ]);
+    assert.deepEqual(mapVote(testChannel1, "1", testMap1), [
+      "You cannot vote now. Ignoring vote.",
+    ]);
+    assert.deepEqual(stopGame(testChannel1), ["Can't stop the game now."]);
 
     // Wait for async work to complete (looking for server + setting map)
     await sleep(MOCK_ASYNC_SLEEP_FOR * 3);
@@ -1890,22 +1890,24 @@ export const test = async () => {
     assert(Object.values(storedGame.players).length === 12);
 
     // Test invalid after game has been completed and another has not started yet
-    assert(mapVote(testChannel1, `invalid`, testMap1) === NO_GAME_STARTED);
-    assert.deepEqual(removePlayer(testChannel1, `1`), [NO_GAME_STARTED]);
-    assert(
-      readyPlayer(testChannel1, `1`, DEFAULT_READY_FOR) === NO_GAME_STARTED
-    );
-    assert(stopGame(testChannel1) === NO_GAME_STARTED);
-    assert(getStatus(testChannel1) === NO_GAME_STARTED);
-    assert.deepEqual(kickPlayer(testChannel1, `1`), [NO_GAME_STARTED]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
+      NO_GAME_STARTED,
+    ]);
+    assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
+      NO_GAME_STARTED,
+    ]);
+    assert.deepEqual(stopGame(testChannel1), [NO_GAME_STARTED]);
+    assert.deepEqual(getStatus(testChannel1), [NO_GAME_STARTED]);
+    assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
   };
 
   const testReadyTimeout = async () => {
     // Start a second game by adding a player to test ready up timeout
-    assert.deepEqual(addPlayer(testChannel1, `1`), [
+    assert.deepEqual(addPlayer(testChannel1, "1"), [
       NEW_GAME_STARTED,
-      `Added: <@1>`,
-      getStatus(testChannel1),
+      "Added: <@1>",
+      ...getStatus(testChannel1),
     ]);
 
     assert(store.getState().games[testChannel1].state === GameState.AddRemove);
@@ -1914,7 +1916,7 @@ export const test = async () => {
     for (let x = 1; x < 11; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
-        getStatus(testChannel1),
+        ...getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
@@ -1939,37 +1941,37 @@ export const test = async () => {
     }
 
     // Add last player
-    assert.deepEqual(addPlayer(testChannel1, `12`), [
-      `Added: <@12>`,
-      getStatus(testChannel1),
-      `The game is full.`,
+    assert.deepEqual(addPlayer(testChannel1, "12"), [
+      "Added: <@12>",
+      ...getStatus(testChannel1),
+      "The game is full.",
     ]);
 
     assert(store.getState().games[testChannel1].state === GameState.ReadyCheck);
 
     // Test invalid states when waiting for players to ready up
-    assert(startGame(testChannel1) === GAME_ALREADY_STARTED);
-    assert.deepEqual(addPlayer(testChannel1, `12`), [
-      `Can't add <@12> right now. Ignoring.`,
+    assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
+    assert.deepEqual(addPlayer(testChannel1, "12"), [
+      "Can't add <@12> right now. Ignoring.",
     ]);
     assert(
-      mapVote(testChannel1, `invalid`, testMap1),
-      `Not in map voting phase. Ignoring vote.`
+      mapVote(testChannel1, "invalid", testMap1),
+      "Not in map voting phase. Ignoring vote."
     );
     assert(stopGame(testChannel1), "Can't stop the game now.");
 
     // Readying up a player should work at this stage
     assert(
-      readyPlayer(testChannel1, `12`, DEFAULT_READY_FOR).includes(
-        `<@12> is ready for 10min (until `
+      readyPlayer(testChannel1, "12", DEFAULT_READY_FOR)[0].includes(
+        "<@12> is ready for 10min (until "
       )
     );
 
     // Test removing player when waiting for players to ready up
-    assert.deepEqual(removePlayer(testChannel1, `12`), [
+    assert.deepEqual(removePlayer(testChannel1, "12"), [
       "Cancelling ready check.",
       "Removed: <@12>",
-      getStatus(testChannel1),
+      ...getStatus(testChannel1),
     ]);
 
     assert(store.getState().games[testChannel1].state === GameState.AddRemove);
@@ -1978,10 +1980,10 @@ export const test = async () => {
     );
 
     // Add a last player
-    assert.deepEqual(addPlayer(testChannel1, `12`), [
-      `Added: <@12>`,
-      getStatus(testChannel1),
-      `The game is full.`,
+    assert.deepEqual(addPlayer(testChannel1, "12"), [
+      "Added: <@12>",
+      ...getStatus(testChannel1),
+      "The game is full.",
     ]);
 
     // Wait for ready up timeout
@@ -2000,13 +2002,13 @@ export const test = async () => {
     for (let x = 0; x < 10; x++) {
       assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
         `Added: <@${x + 1}>`,
-        getStatus(testChannel1),
+        ...getStatus(testChannel1),
       ]);
       await sleep(10); // Get a different timestamp for each player
     }
-    assert.deepEqual(addPlayer(testChannel1, `11`), [
-      `Added: <@11>`,
-      getStatus(testChannel1),
+    assert.deepEqual(addPlayer(testChannel1, "11"), [
+      "Added: <@11>",
+      ...getStatus(testChannel1),
       "The game is full.",
     ]);
 
@@ -2019,47 +2021,42 @@ export const test = async () => {
 
   const testUltiduo = async () => {
     // Test a second channel with Ultiduo
-    assert(
-      setChannelGameMode(testChannel2, GameMode.Ultiduo) ===
-        `Game mode set to ULTIDUO.`
-    );
-    assert(startGame(testChannel2) === NEW_GAME_STARTED);
-    assert.deepEqual(addPlayer(testChannel2, `a`), [
-      `Added: <@a>`,
+    assert.deepEqual(setGameMode(testChannel2, GameMode.Ultiduo), [
+      "Game mode set to ULTIDUO.",
+    ]);
+    assert.deepEqual(startGame(testChannel2), [NEW_GAME_STARTED]);
+    assert.deepEqual(addPlayer(testChannel2, "a"), [
+      "Added: <@a>",
       "Status (1/4): <@a>:ballot_box_with_check: ",
     ]);
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, `b`), [
-      `Added: <@b>`,
+    assert.deepEqual(addPlayer(testChannel2, "b"), [
+      "Added: <@b>",
       "Status (2/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: ",
     ]);
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, `c`), [
-      `Added: <@c>`,
+    assert.deepEqual(addPlayer(testChannel2, "c"), [
+      "Added: <@c>",
       "Status (3/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: ",
     ]);
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, `d`), [
-      `Added: <@d>`,
+    assert.deepEqual(addPlayer(testChannel2, "d"), [
+      "Added: <@d>",
       "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
       "The game is full.",
     ]);
-    assert(
-      mapVote(testChannel2, `a`, "koth_ultiduo_r_b7") ===
-        `You voted for koth_ultiduo_r_b7.`
-    );
-    assert(
-      mapVote(testChannel2, `b`, "ultiduo_baloo_v2") ===
-        "You voted for ultiduo_baloo_v2."
-    );
-    assert(
-      mapVote(testChannel2, `c`, "ultiduo_baloo_v2") ===
-        "You voted for ultiduo_baloo_v2."
-    );
-    assert(
-      mapVote(testChannel2, `d`, "ultiduo_baloo_v2") ===
-        "You voted for ultiduo_baloo_v2."
-    );
+    assert.deepEqual(mapVote(testChannel2, "a", "koth_ultiduo_r_b7"), [
+      "You voted for koth_ultiduo_r_b7.",
+    ]);
+    assert.deepEqual(mapVote(testChannel2, "b", "ultiduo_baloo_v2"), [
+      "You voted for ultiduo_baloo_v2.",
+    ]);
+    assert.deepEqual(mapVote(testChannel2, "c", "ultiduo_baloo_v2"), [
+      "You voted for ultiduo_baloo_v2.",
+    ]);
+    assert.deepEqual(mapVote(testChannel2, "d", "ultiduo_baloo_v2"), [
+      "You voted for ultiduo_baloo_v2.",
+    ]);
 
     // Check the winning map and num players
     assert(
@@ -2073,7 +2070,7 @@ export const test = async () => {
 
   const testUnreadyDuringReadyTimeout = async () => {
     // Test player becoming unready while readying up players.
-    setChannelGameMode(testChannel3, GameMode.BBall);
+    setGameMode(testChannel3, GameMode.BBall);
     addPlayer(testChannel3, "1");
     addPlayer(testChannel3, "2");
 
