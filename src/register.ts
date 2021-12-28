@@ -14,11 +14,11 @@ const run = async () => {
   const commands = [
     new SlashCommandBuilder()
       .setName(Commands.Setup)
-      .setDescription("Set's up the game mode of the PUG")
+      .setDescription("Set the game mode for this channel.")
       .addStringOption((option) =>
         option
           .setName("mode")
-          .setDescription("The game mode to run in this channel")
+          .setDescription("The game mode to run in this channel.")
           .setRequired(true)
           .addChoice(GameMode.BBall, GameMode.BBall)
           .addChoice(GameMode.Highlander, GameMode.Highlander)
@@ -54,7 +54,7 @@ const run = async () => {
       ),
     new SlashCommandBuilder()
       .setName(Commands.Ready)
-      .setDescription("Readies up")
+      .setDescription("Ready up")
       .addNumberOption((option) =>
         option
           .setName("minutes")
@@ -63,11 +63,11 @@ const run = async () => {
       ),
     new SlashCommandBuilder()
       .setName(Commands.Stop)
-      .setDescription("Stops the PUG"),
+      .setDescription("Stop the PUG."),
     new SlashCommandBuilder()
       .setName(Commands.Vacate)
       .setDescription(
-        "Kick all players from a TF2 server. You will be asked (buttons) which server to kick players from."
+        "Kick all players one of the PUG TF2 servers. You will be asked (buttons) which server to vacate."
       ),
     new SlashCommandBuilder()
       .setName(Commands.MapVote)
