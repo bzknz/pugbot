@@ -132,6 +132,11 @@ type Channel = {
 
 type Channels = { [channelId: string]: Channel };
 
+type Server = {
+  socketAddress: string;
+  name: string;
+};
+
 type RootState = { games: Games; channels: Channels };
 
 type SetChannelGameMode = {
@@ -153,7 +158,8 @@ type UpdateGame = {
   type: typeof UPDATE_GAME;
   payload: {
     channelId: string;
-  } & Partial<Game>;
+    game: Partial<Game>;
+  };
 };
 
 type AddPlayer = {
@@ -196,7 +202,7 @@ type Msg = string;
 
 const getIsTestMode = () => process.env.TEST_MODE === "true";
 
-const gameModeToNumPlayers = (gameMode: GameMode): number => {
+const getGameModeNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
     case GameMode.BBall:
       return 4;
@@ -252,16 +258,13 @@ const reducer = (
       };
     }
     case UPDATE_GAME: {
-      const { channelId, ...rest } = action.payload;
-      const game = state.games[channelId];
+      const { channelId, game } = action.payload;
+
       return {
         ...state,
         games: {
           ...state.games,
-          [channelId]: {
-            ...game,
-            ...rest,
-          },
+          [channelId]: { ...state.games[channelId], ...game },
         },
       };
     }
@@ -373,11 +376,9 @@ const sendMsg = async (
     console.log(channelId, embedText, mainText);
     return null;
   }
-  // Send message on Discord
-  // console.log(`${channelId}: ${embedText}`);
   const channel = getDiscordChannel(channelId);
 
-  const msgObj: MessageOptions = { embeds: [getEmbed(embedText)] };
+  const msgObj: MessageOptions = { embeds: [embedMsg(embedText)] };
   if (mainText) {
     msgObj.content = mainText;
   }
@@ -452,7 +453,7 @@ const getGame = (channelId: string) => {
   return state.games[channelId];
 };
 
-const checkPlayerAdded = (channelId: string, playerId: string) => {
+const getIsPlayerAdded = (channelId: string, playerId: string): boolean => {
   const game = getGame(channelId);
   return !!game.players[playerId];
 };
@@ -491,8 +492,8 @@ const startGame = (channelId: string): Msg[] => {
   return [NEW_GAME_STARTED];
 };
 
-const updateGame = (action: UpdateGame) => {
-  store.dispatch(action);
+const updateGame = (channelId: string, game: Partial<Game>) => {
+  store.dispatch({ type: UPDATE_GAME, payload: { channelId, game } });
 };
 
 const stopGame = (channelId: string): Msg[] => {
@@ -537,14 +538,14 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
     return [`Can't add ${mentionPlayer(playerId)} right now. Ignoring.`];
   }
 
-  const isAdded = checkPlayerAdded(channelId, playerId);
+  const isAdded = getIsPlayerAdded(channelId, playerId);
   if (isAdded) {
     return [`${mentionPlayer(playerId)} is already added. Ignoring.`];
   }
 
   const prevNumPlayers = getPlayers(game).length;
   const nextNumPlayers = prevNumPlayers + 1;
-  const totalPlayers = gameModeToNumPlayers(game.mode);
+  const totalPlayers = getGameModeNumPlayers(game.mode);
 
   // Sanity check
   if (nextNumPlayers > totalPlayers) {
@@ -571,10 +572,7 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
   const msgs = [`Added: ${mentionPlayer(playerId)}`, ...getStatus(channelId)];
 
   if (nextNumPlayers === totalPlayers) {
-    updateGame({
-      type: UPDATE_GAME,
-      payload: { channelId, readyCheckAt: timestamp },
-    });
+    updateGame(channelId, { readyCheckAt: timestamp });
 
     msgs.push(`The game is full.`);
 
@@ -591,13 +589,9 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
           type: REMOVE_PLAYERS,
           payload: { channelId, playerIds: unreadyPlayerIds },
         });
-        updateGame({
-          type: UPDATE_GAME,
-          payload: {
-            channelId,
-            state: GameState.AddRemove,
-            readyTimeout: null,
-          },
+        updateGame(channelId, {
+          state: GameState.AddRemove,
+          readyTimeout: null,
         });
 
         sendMsg(
@@ -611,14 +605,7 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
         );
       }, READY_TIMEOUT);
 
-      updateGame({
-        type: UPDATE_GAME,
-        payload: {
-          channelId,
-          state: GameState.ReadyCheck,
-          readyTimeout,
-        },
-      });
+      updateGame(channelId, { state: GameState.ReadyCheck, readyTimeout });
 
       // Ask unready players to ready
       const row = new MessageActionRow().addComponents(
@@ -630,7 +617,7 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
 
       const channel = getDiscordChannel(channelId);
 
-      const embed = getEmbed(
+      const embed = embedMsg(
         `:hourglass: ${
           unreadyPlayerIds.length
         } player(s) are not ready. Waiting ${
@@ -732,10 +719,7 @@ const startMapVote = (channelId: string) => {
   const existingGame = getGame(channelId);
   if (existingGame.readyTimeout) {
     clearTimeout(existingGame.readyTimeout);
-    updateGame({
-      type: UPDATE_GAME,
-      payload: { channelId, readyTimeout: null },
-    });
+    updateGame(channelId, { readyTimeout: null });
   }
 
   // Push to the end of the call stack (send after last player add response)
@@ -763,21 +747,17 @@ const startMapVote = (channelId: string) => {
       mapVoteComplete(channelId);
     }, MAP_VOTE_TIMEOUT);
 
-    updateGame({
-      type: UPDATE_GAME,
-      payload: {
-        channelId,
-        state: GameState.MapVote,
-        mapVoteAt: Date.now(),
-        mapVoteTimeout,
-      },
+    updateGame(channelId, {
+      state: GameState.MapVote,
+      mapVoteAt: Date.now(),
+      mapVoteTimeout,
     });
 
     const rows = getMapVoteButtons(channelId);
 
     const game = getGame(channelId);
     const players = getPlayers(game);
-    const embed = getEmbed(
+    const embed = embedMsg(
       `:ballot_box: Map vote starting now. Click the map you want to play (click another to change your vote). Waiting ${
         MAP_VOTE_TIMEOUT / 1000
       } seconds for votes.`
@@ -810,7 +790,7 @@ const removePlayer = (channelId: string, playerId: string): Msg[] => {
     return [NO_GAME_STARTED];
   }
 
-  const isAdded = checkPlayerAdded(channelId, playerId);
+  const isAdded = getIsPlayerAdded(channelId, playerId);
   if (!isAdded) {
     return [`${mentionPlayer(playerId)} is not added. Ignoring.`];
   }
@@ -823,19 +803,13 @@ const removePlayer = (channelId: string, playerId: string): Msg[] => {
   }
 
   store.dispatch({ type: REMOVE_PLAYER, payload: { channelId, playerId } });
-  updateGame({
-    type: UPDATE_GAME,
-    payload: { channelId, state: GameState.AddRemove },
-  });
+  updateGame(channelId, { state: GameState.AddRemove });
 
   const msgs = [];
 
   if (existingGame.readyTimeout) {
     clearTimeout(existingGame.readyTimeout);
-    updateGame({
-      type: UPDATE_GAME,
-      payload: { channelId, readyTimeout: null },
-    });
+    updateGame(channelId, { readyTimeout: null });
     msgs.push(`Cancelling ready check.`);
   }
 
@@ -862,7 +836,7 @@ const getStatus = (channelId: string): Msg[] => {
   const game = getGame(channelId);
   const players = getPlayers(game);
   const numPlayers = players.length;
-  const totalPlayers = gameModeToNumPlayers(game.mode);
+  const totalPlayers = getGameModeNumPlayers(game.mode);
 
   let msg = `Status (${numPlayers}/${totalPlayers}): `;
   if (players.length === 0) {
@@ -871,7 +845,7 @@ const getStatus = (channelId: string): Msg[] => {
     const now = Date.now();
     for (const player of players) {
       msg += `${mentionPlayer(player.id)}`;
-      const isReady = isPlayerReady(now, player.readyUntil);
+      const isReady = getIsPlayerReady(now, player.readyUntil);
       if (isReady) {
         msg += `:ballot_box_with_check: `;
       } else {
@@ -904,7 +878,7 @@ const readyPlayer = (
     return [`Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`];
   }
 
-  const isAdded = checkPlayerAdded(channelId, playerId);
+  const isAdded = getIsPlayerAdded(channelId, playerId);
   if (!isAdded) {
     return [`${mentionPlayer(playerId)} is not added. Ignoring.`];
   }
@@ -929,7 +903,7 @@ const readyPlayer = (
   const players = getPlayers(game);
   if (
     unreadyPlayerIds.length === 0 &&
-    players.length === gameModeToNumPlayers(game.mode)
+    players.length === getGameModeNumPlayers(game.mode)
   ) {
     startMapVote(channelId);
   }
@@ -983,11 +957,6 @@ const getServerDetails = async (
     console.log(`Error getting server response for ${socketAddress}.`);
     return null;
   }
-};
-
-type Server = {
-  socketAddress: string;
-  name: string;
 };
 
 const findAvailableServer = async (): Promise<Server | null> => {
@@ -1216,15 +1185,11 @@ const mapVoteComplete = async (channelId: string) => {
     }
   }
 
-  updateGame({
-    type: UPDATE_GAME,
-    payload: {
-      channelId,
-      map: winningMap,
-      state: GameState.FindingServer,
-      findingServerAt: Date.now(),
-      mapVoteTimeout: null,
-    },
+  updateGame(channelId, {
+    map: winningMap,
+    state: GameState.FindingServer,
+    findingServerAt: Date.now(),
+    mapVoteTimeout: null,
   });
 
   msgs.push(
@@ -1255,14 +1220,10 @@ const mapVoteComplete = async (channelId: string) => {
   }
 
   if (server) {
-    updateGame({
-      type: UPDATE_GAME,
-      payload: {
-        channelId,
-        state: GameState.SettingMap,
-        socketAddress: server.socketAddress,
-        settingMapAt: Date.now(),
-      },
+    updateGame(channelId, {
+      state: GameState.SettingMap,
+      socketAddress: server.socketAddress,
+      settingMapAt: Date.now(),
     });
 
     await sendMsg(
@@ -1274,13 +1235,9 @@ const mapVoteComplete = async (channelId: string) => {
 
     await sendMsg(channelId, setMapStatus);
 
-    updateGame({
-      type: UPDATE_GAME,
-      payload: {
-        channelId,
-        state: GameState.PlayersConnect,
-        playersConnectAt: Date.now(),
-      },
+    updateGame(channelId, {
+      state: GameState.PlayersConnect,
+      playersConnectAt: Date.now(),
     });
 
     const game = getGame(channelId);
@@ -1310,10 +1267,7 @@ const mapVoteComplete = async (channelId: string) => {
   }
 
   // Set timers to null if they are set (can't stringify)
-  updateGame({
-    type: UPDATE_GAME,
-    payload: { channelId, readyTimeout: null, mapVoteTimeout: null },
-  });
+  updateGame(channelId, { readyTimeout: null, mapVoteTimeout: null });
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
   const game = getGame(channelId);
@@ -1339,7 +1293,7 @@ const getCanVote = (
     return { isAllowed: false, msg: NO_GAME_STARTED };
   }
 
-  const isAdded = checkPlayerAdded(channelId, playerId);
+  const isAdded = getIsPlayerAdded(channelId, playerId);
   if (!isAdded) {
     return { isAllowed: false, msg: `You are not added. Ignoring vote.` };
   }
@@ -1372,14 +1326,11 @@ const mapVote = (
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
   if (
     game.state === GameState.MapVote &&
-    numVotes === gameModeToNumPlayers(game.mode)
+    numVotes === getGameModeNumPlayers(game.mode)
   ) {
     if (game.mapVoteTimeout) {
       clearTimeout(game.mapVoteTimeout);
-      updateGame({
-        type: UPDATE_GAME,
-        payload: { channelId, mapVoteTimeout: null },
-      });
+      updateGame(channelId, { mapVoteTimeout: null });
     }
     // All players voted in the alloted time
     setTimeout(async () => {
@@ -1391,7 +1342,7 @@ const mapVote = (
   return [`You voted for ${mapVote}.`];
 };
 
-const isPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
+const getIsPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
   playerReadyUntil >= unreadyAfter;
 
 const sortPlayers = (a: Player, b: Player) =>
@@ -1408,7 +1359,7 @@ const getUnreadyPlayerIds = (
   const players = getPlayers(game);
   const unreadyPlayerIds = [];
   for (const player of players) {
-    const isReady = isPlayerReady(unreadyAfter, player.readyUntil);
+    const isReady = getIsPlayerReady(unreadyAfter, player.readyUntil);
     if (!isReady) {
       unreadyPlayerIds.push(player.id);
     }
@@ -1416,7 +1367,7 @@ const getUnreadyPlayerIds = (
   return unreadyPlayerIds;
 };
 
-const listMaps = (channelId: string): Msg[] => {
+const getMaps = (channelId: string): Msg[] => {
   const channel = getChannel(channelId);
   if (!channel) {
     return [CHANNEL_NOT_SET_UP];
@@ -1427,9 +1378,9 @@ const listMaps = (channelId: string): Msg[] => {
   return [`Available maps for ${channel.mode}:\n${maps.join("\n")}`];
 };
 
-const getEmbed = (msg: string) => new MessageEmbed().setDescription(msg);
+const embedMsg = (msg: string) => new MessageEmbed().setDescription(msg);
 
-const hasPermission = (
+const getHasPermission = (
   permissions: string | Readonly<Discord.Permissions> | undefined,
   permission: Discord.PermissionResolvable
 ): boolean => {
@@ -1449,7 +1400,7 @@ const handleCommandReply = async (
 ) => {
   const msg = joinMsgs(msgs);
   const reply: Discord.InteractionReplyOptions = {
-    embeds: [getEmbed(msg)],
+    embeds: [embedMsg(msg)],
     ephemeral,
   };
   if (components) {
@@ -1465,7 +1416,7 @@ const handleEditCommandReply = async (
 ) => {
   const msg = joinMsgs(msgs);
   const reply: Discord.InteractionReplyOptions = {
-    embeds: [getEmbed(msg)],
+    embeds: [embedMsg(msg)],
   };
   if (components) {
     reply.components = components;
@@ -1479,7 +1430,7 @@ const handleButtonReply = async (
   ephemeral = false
 ) => {
   const msg = joinMsgs(msgs);
-  await interaction.reply({ embeds: [getEmbed(msg)], ephemeral });
+  await interaction.reply({ embeds: [embedMsg(msg)], ephemeral });
 };
 
 const handleEditButtonReply = async (
@@ -1487,7 +1438,7 @@ const handleEditButtonReply = async (
   msgs: Msg[]
 ) => {
   const msg = joinMsgs(msgs);
-  await interaction.editReply({ embeds: [getEmbed(msg)] });
+  await interaction.editReply({ embeds: [embedMsg(msg)] });
 };
 
 export const run = () => {
@@ -1518,7 +1469,7 @@ export const run = () => {
     switch (commandName) {
       case Commands.Setup: {
         if (
-          hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
+          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
         ) {
           const mode = interaction.options.getString("mode") as GameMode;
           const msgs = setGameMode(channelId, mode);
@@ -1543,12 +1494,14 @@ export const run = () => {
         break;
       }
       case Commands.Maps: {
-        const msgs = listMaps(channelId);
+        const msgs = getMaps(channelId);
         await handleCommandReply(interaction, msgs);
         break;
       }
       case Commands.Stop: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+        if (
+          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+        ) {
           const msgs = stopGame(channelId);
           await handleCommandReply(interaction, msgs);
         } else {
@@ -1571,7 +1524,9 @@ export const run = () => {
         break;
       }
       case Commands.Kick: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+        if (
+          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+        ) {
           const targetPlayer = interaction.options.getUser("user");
           if (targetPlayer) {
             const msgs = kickPlayer(channelId, targetPlayer.id);
@@ -1598,7 +1553,9 @@ export const run = () => {
         break;
       }
       case Commands.Vacate: {
-        if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+        if (
+          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+        ) {
           // Send the user button options asking which server to vacate from.
 
           await interaction.deferReply({ ephemeral: true });
@@ -1681,7 +1638,7 @@ export const run = () => {
       const msgs = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
       await handleButtonReply(interaction, msgs, true);
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
-      if (hasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+      if (getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
         const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
         const msgs = await vacate(socketAddress);
@@ -1708,7 +1665,7 @@ export const test = async () => {
 
   store.subscribe(() => {
     const s = store.getState();
-    // console.log(JSON.stringify(s) + "\n");
+    // console.log(s);
   });
 
   const testChannel1 = "test-channel-1";
@@ -1731,7 +1688,7 @@ export const test = async () => {
     ]);
     assert.deepEqual(stopGame(testChannel1), [CHANNEL_NOT_SET_UP]);
     assert.deepEqual(getStatus(testChannel1), [CHANNEL_NOT_SET_UP]);
-    assert.deepEqual(listMaps(testChannel1), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(getMaps(testChannel1), [CHANNEL_NOT_SET_UP]);
     assert.deepEqual(kickPlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
 
     // Setup channel
@@ -1751,7 +1708,7 @@ export const test = async () => {
     assert.deepEqual(getStatus(testChannel1), [NO_GAME_STARTED]);
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
-    assert.deepEqual(listMaps(testChannel1), [
+    assert.deepEqual(getMaps(testChannel1), [
       "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx",
     ]);
 
@@ -1860,8 +1817,14 @@ export const test = async () => {
     ]);
 
     // Check in map vote state
-    assert(getPlayers(store.getState().games[testChannel1]).length === 12);
-    assert(store.getState().games[testChannel1].state === GameState.MapVote);
+    assert.deepEqual(
+      getPlayers(store.getState().games[testChannel1]).length,
+      12
+    );
+    assert.deepEqual(
+      store.getState().games[testChannel1].state,
+      GameState.MapVote
+    );
 
     // Test invalid actions when in map vote state
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
