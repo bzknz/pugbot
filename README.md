@@ -1,5 +1,11 @@
 # Pugbot
 
+A Discord TF2 pick-up game (PUG) bot that handles sixes, ultiduo, bball and highlander game modes. It was developed for the [TF2SA](https://tf2sa.xyz/) community. It has a ready-up check and a map voting phase. The winning map is set on the server via RCON. A server is selected from a pool of servers set in the `.env` file. The first server with no players connected will be used.
+
+A game mode is set per Discord channel with the `/setup` slash command in the channel. Channel game modes are saved in `./data/channels/`. Data for each game is saved in `./data/games/`.
+
+The bot expects the TF2 servers to be configured to set the game mode rules based on the map that has been selected. For example a per map `.cfg` file that runs something like `exec etf2l_6v6_5cp.cfg`. In other words, this bot only sets the map on the TF2 server and does no additional config via RCON.
+
 ## Config
 
 ## `.evn` file
@@ -20,7 +26,7 @@ DISCORD_CLIENT_ID=<id>
 TF2_SERVERS=111.111.111.111:27015,111.111.111.112:27015
 
 # Rcon password set on each of these TF2 servers
-RCON_PASSWORD=<token>
+RCON_PASSWORD=<password>
 ```
 
 ## Maps
