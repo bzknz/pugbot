@@ -11,7 +11,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import Gamedig from "gamedig";
 import { createStore } from "redux";
-import { filterObjectByKeys, orderRecentFiles } from "./utils";
+import { filterObjectByKeys, orderRecentFiles, sleep } from "./utils";
 
 const Rcon: any = require("rcon");
 
@@ -520,27 +520,36 @@ const getGameModeMaps = (mode: GameMode) => {
   return maps[mode];
 };
 
-const addPlayer = (channelId: string, playerId: string): Msg[] => {
+const addPlayer = (
+  channelId: string,
+  playerId: string
+): { msgs: Msg[]; isFull: boolean } => {
   const channel = getChannel(channelId);
   if (!channel) {
-    return [CHANNEL_NOT_SET_UP];
+    return { msgs: [CHANNEL_NOT_SET_UP], isFull: false };
   }
 
-  const game = getGame(channelId);
+  const msgs = [];
+  let game = getGame(channelId);
+  // If a game has not been started, start one now
   if (!game) {
-    const msgs = [];
     msgs.push(...startGame(channelId));
-    msgs.push(...addPlayer(channelId, playerId));
-    return msgs;
+    game = getGame(channelId);
   }
 
   if (game.state !== GameState.AddRemove) {
-    return [`Can't add ${mentionPlayer(playerId)} right now. Ignoring.`];
+    return {
+      msgs: [`Can't add ${mentionPlayer(playerId)} right now. Ignoring.`],
+      isFull: false,
+    };
   }
 
   const isAdded = getIsPlayerAdded(channelId, playerId);
   if (isAdded) {
-    return [`${mentionPlayer(playerId)} is already added. Ignoring.`];
+    return {
+      msgs: [`${mentionPlayer(playerId)} is already added. Ignoring.`],
+      isFull: false,
+    };
   }
 
   const prevNumPlayers = getPlayers(game).length;
@@ -552,7 +561,10 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
     console.error(
       `Bug: More than total num players added to game in channelId: ${channelId}.`
     );
-    return [`Bug: More than total num players added to game`];
+    return {
+      msgs: [`Bug: More than total num players added to game`],
+      isFull: false,
+    };
   }
 
   const timestamp = Date.now();
@@ -569,83 +581,90 @@ const addPlayer = (channelId: string, playerId: string): Msg[] => {
     payload: { channelId, player },
   });
 
-  const msgs = [`Added: ${mentionPlayer(playerId)}`, ...getStatus(channelId)];
+  msgs.push(`Added: ${mentionPlayer(playerId)}`, ...getStatus(channelId));
 
   if (nextNumPlayers === totalPlayers) {
     updateGame(channelId, { readyCheckAt: timestamp });
-
     msgs.push(`The game is full.`);
-
-    const unreadyAfter = Date.now();
-    const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
-    if (unreadyPlayerIds.length === 0) {
-      startMapVote(channelId);
-    } else {
-      // Setup timeout if not all players ready up in time.
-      const readyTimeout = setTimeout(() => {
-        // If this runs (will be cancelled if all players ready up), remove the unready players.
-        const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
-        store.dispatch({
-          type: REMOVE_PLAYERS,
-          payload: { channelId, playerIds: unreadyPlayerIds },
-        });
-        updateGame(channelId, {
-          state: GameState.AddRemove,
-          readyTimeout: null,
-        });
-
-        sendMsg(
-          channelId,
-          `:slight_frown: Removed ${
-            unreadyPlayerIds.length
-          } unready player(s) as they did not ready up in time.\n${getStatus(
-            channelId
-          )}`,
-          `Removed: ${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
-        );
-      }, READY_TIMEOUT);
-
-      updateGame(channelId, { state: GameState.ReadyCheck, readyTimeout });
-
-      // Ask unready players to ready
-      const row = new MessageActionRow().addComponents(
-        new MessageButton()
-          .setCustomId(READY_BUTTON)
-          .setLabel("Ready up!")
-          .setStyle("SUCCESS")
-      );
-
-      const channel = getDiscordChannel(channelId);
-
-      const embed = embedMsg(
-        `:hourglass: ${
-          unreadyPlayerIds.length
-        } player(s) are not ready. Waiting ${
-          READY_TIMEOUT / 1000
-        } seconds for them. Click the button (or use \`/ready\`) to ready up.`
-      );
-
-      if (channel?.isText()) {
-        channel
-          .send({
-            embeds: [embed],
-            components: [row],
-            content: `Unready: ${unreadyPlayerIds
-              .map((p) => mentionPlayer(p))
-              .join(" ")}`,
-          })
-          .then((embed) => {
-            for (const unreadyPlayerId of unreadyPlayerIds) {
-              sendDM(
-                unreadyPlayerId,
-                `Please ready up for you ${game.mode} PUG: ${embed.url}`
-              );
-            }
-          });
-      }
-    }
+    return { msgs, isFull: true };
+  } else {
+    return { msgs, isFull: false };
   }
-  return msgs;
+};
+
+const handleGameFull = async (channelId: string) => {
+  // Check if all players are ready
+  const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+  if (unreadyPlayerIds.length === 0) {
+    await handlePlayersReady(channelId);
+  } else {
+    await handleUnreadyPlayers(channelId);
+  }
+};
+
+const handleUnreadyPlayers = async (channelId: string) => {
+  // Setup timeout if not all players ready up in time.
+  const readyTimeout = setTimeout(async () => {
+    // If this runs (will be cancelled if all players ready up), remove the unready players.
+    const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+    store.dispatch({
+      type: REMOVE_PLAYERS,
+      payload: { channelId, playerIds: unreadyPlayerIds },
+    });
+    updateGame(channelId, {
+      state: GameState.AddRemove,
+      readyTimeout: null,
+    });
+
+    await sendMsg(
+      channelId,
+      `:slight_frown: Removed ${
+        unreadyPlayerIds.length
+      } unready player(s) as they did not ready up in time.\n${getStatus(
+        channelId
+      )}`,
+      `Removed: ${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
+    );
+  }, READY_TIMEOUT);
+
+  updateGame(channelId, { state: GameState.ReadyCheck, readyTimeout });
+
+  // Ask unready players to ready
+  const row = new MessageActionRow().addComponents(
+    new MessageButton()
+      .setCustomId(READY_BUTTON)
+      .setLabel("Ready up!")
+      .setStyle("SUCCESS")
+  );
+
+  const channel = getDiscordChannel(channelId);
+
+  const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+  const embed = embedMsg(
+    `:hourglass: ${unreadyPlayerIds.length} player(s) are not ready. Waiting ${
+      READY_TIMEOUT / 1000
+    } seconds for them. Click the button (or use \`/ready\`) to ready up.`
+  );
+
+  if (channel?.isText()) {
+    const gameMode = getGame(channelId).mode;
+    await channel
+      .send({
+        embeds: [embed],
+        components: [row],
+        content: `Unready: ${unreadyPlayerIds
+          .map((p) => mentionPlayer(p))
+          .join(" ")}`,
+      })
+      .then((embed) => {
+        for (const unreadyPlayerId of unreadyPlayerIds) {
+          sendDM(
+            unreadyPlayerId,
+            `Please ready up for you ${gameMode} PUG: ${embed.url}`
+          );
+        }
+      });
+  }
 };
 
 const removePlayers = (channelId: string, playerIds: string[]) => {
@@ -712,7 +731,7 @@ const getMapVoteButtons = (channelId: string): Discord.MessageActionRow[] => {
   return rows;
 };
 
-const startMapVote = (channelId: string) => {
+const handlePlayersReady = async (channelId: string) => {
   // All players are now ready - start map vote
   removePlayersFromOtherGames(channelId);
 
@@ -722,29 +741,26 @@ const startMapVote = (channelId: string) => {
     updateGame(channelId, { readyTimeout: null });
   }
 
-  // Push to the end of the call stack (send after last player add response)
-  setTimeout(async () => {
-    await sendMsg(channelId, `All players are ready.`);
-  });
+  await sendMsg(channelId, `All players are ready.`);
 
   const maps = getGameModeMaps(existingGame.mode);
 
   if (maps.length === 1) {
     // Special case for only one map (BBall)
-    mapVoteComplete(channelId);
+    await mapVoteComplete(channelId);
   } else {
     // If not all players vote within the time limit, tally votes.
-    const mapVoteTimeout = setTimeout(() => {
+    const mapVoteTimeout = setTimeout(async () => {
       const game = getGame(channelId);
       const players = getPlayers(game);
       const numVotes = players.filter((p) => p.mapVote).length;
 
-      sendMsg(
+      await sendMsg(
         channelId,
         `${numVotes}/${players.length} players voted within the time limit.`
       );
 
-      mapVoteComplete(channelId);
+      await mapVoteComplete(channelId);
     }, MAP_VOTE_TIMEOUT);
 
     updateGame(channelId, {
@@ -765,15 +781,12 @@ const startMapVote = (channelId: string) => {
 
     const channel = getDiscordChannel(channelId);
     if (channel?.isText()) {
-      // Push to the end of the call stack (send after last player add response)
-      setTimeout(async () => {
-        await channel.send({
-          embeds: [embed],
-          components: rows,
-          content: `Vote now: ${players
-            .map((p) => mentionPlayer(p.id))
-            .join(" ")}`,
-        });
+      await channel.send({
+        embeds: [embed],
+        components: rows,
+        content: `Vote now: ${players
+          .map((p) => mentionPlayer(p.id))
+          .join(" ")}`,
       });
     }
   }
@@ -894,28 +907,21 @@ const readyPlayer = (
   const readyUntilDate = new Date(readyUntil);
 
   const game = getGame(channelId);
-  // Use readyCheckAt if we are in ready up state otherwise some players could become unready (timed out during ready check)
-  const unreadyAfter =
-    game.state === GameState.ReadyCheck && game.readyCheckAt
-      ? game.readyCheckAt
-      : Date.now();
-  const unreadyPlayerIds = getUnreadyPlayerIds(channelId, unreadyAfter);
-  const players = getPlayers(game);
-  if (
-    unreadyPlayerIds.length === 0 &&
-    players.length === getGameModeNumPlayers(game.mode)
-  ) {
-    startMapVote(channelId);
+
+  // Check if this ready up means all players are ready
+  if (game.state === GameState.ReadyCheck) {
+    // If the game is full
+    const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+    if (unreadyPlayerIds.length === 0) {
+      handlePlayersReady(channelId);
+    }
   }
+
   return [
     `${mentionPlayer(playerId)} is ready for ${Math.round(
       normalizedTime / 1000 / 60
     )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`,
   ];
-};
-
-const sleep = (ms: number) => {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
 const splitSocketAddress = (
@@ -1204,10 +1210,7 @@ const mapVoteComplete = async (channelId: string) => {
     )}min timeout])... An admin can \`/vacate\` to kick all players from a server.`
   );
 
-  // Push to the end of the call stack
-  setTimeout(async () => {
-    await sendMsg(channelId, msgs.join("\n\n"));
-  });
+  await sendMsg(channelId, msgs.join("\n\n"));
 
   let server: null | Server = null;
   for (let x = 0; x < FIND_SERVER_ATTEMPTS; x++) {
@@ -1259,7 +1262,7 @@ const mapVoteComplete = async (channelId: string) => {
   } else {
     const game = getGame(channelId);
     const playerIds = getPlayers(game).map((p) => p.id);
-    sendMsg(
+    await sendMsg(
       channelId,
       `:exclamation: **Could not find an available server. If one is available, please connect now.**`,
       `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
@@ -1351,11 +1354,9 @@ const sortPlayers = (a: Player, b: Player) =>
 const getPlayers = (game: Game) =>
   Object.values(game.players).sort(sortPlayers);
 
-const getUnreadyPlayerIds = (
-  channelId: string,
-  unreadyAfter: number
-): string[] => {
+const getUnreadyPlayerIds = (channelId: string): string[] => {
   const game = getGame(channelId);
+  const unreadyAfter = game.readyCheckAt as number;
   const players = getPlayers(game);
   const unreadyPlayerIds = [];
   for (const player of players) {
@@ -1514,8 +1515,11 @@ export const run = () => {
         break;
       }
       case Commands.Add: {
-        const msgs = addPlayer(channelId, playerId);
+        const { msgs, isFull } = addPlayer(channelId, playerId);
         await handleCommandReply(interaction, msgs);
+        if (isFull) {
+          await handleGameFull(channelId);
+        }
         break;
       }
       case Commands.Remove: {
@@ -1678,7 +1682,10 @@ export const test = async () => {
   const testGame = async () => {
     // Test invalid commands when channel is not set up
     assert.deepEqual(startGame(testChannel1), [CHANNEL_NOT_SET_UP]);
-    assert.deepEqual(addPlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: [CHANNEL_NOT_SET_UP],
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
     assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
       CHANNEL_NOT_SET_UP,
@@ -1713,11 +1720,14 @@ export const test = async () => {
     ]);
 
     // Start a game with /add
-    assert.deepEqual(addPlayer(testChannel1, "1"), [
-      NEW_GAME_STARTED,
-      "Added: <@1>",
-      "Status (1/12): <@1>:ballot_box_with_check: ",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: [
+        NEW_GAME_STARTED,
+        "Added: <@1>",
+        "Status (1/12): <@1>:ballot_box_with_check: ",
+      ],
+    });
 
     // Stop the game
     assert.deepEqual(stopGame(testChannel1), [STOPPED_GAME]);
@@ -1762,10 +1772,10 @@ export const test = async () => {
 
     // Add 11 Status (not full)
     for (let x = 0; x < 11; x++) {
-      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-        `Added: <@${x + 1}>`,
-        ...getStatus(testChannel1),
-      ]);
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), {
+        isFull: false,
+        msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
+      });
       await sleep(10); // Get a different timestamp for each player
     }
 
@@ -1789,9 +1799,10 @@ export const test = async () => {
     );
 
     // Try add player again
-    assert.deepEqual(addPlayer(testChannel1, "1"), [
-      "<@1> is already added. Ignoring.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: ["<@1> is already added. Ignoring."],
+    });
 
     // Remove all 11 players
     for (let x = 0; x < 11; x++) {
@@ -1803,18 +1814,19 @@ export const test = async () => {
 
     // Add all players to fill game
     for (let x = 0; x < 11; x++) {
-      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-        `Added: <@${x + 1}>`,
-        ...getStatus(testChannel1),
-      ]);
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), {
+        isFull: false,
+        msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
+      });
       await sleep(10); // Get a different timestamp for each player
     }
 
-    assert.deepEqual(addPlayer(testChannel1, "12"), [
-      "Added: <@12>",
-      ...getStatus(testChannel1),
-      "The game is full.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "12"), {
+      isFull: true,
+      msgs: ["Added: <@12>", ...getStatus(testChannel1), "The game is full."],
+    });
+
+    await handleGameFull(testChannel1);
 
     // Check in map vote state
     assert.deepEqual(
@@ -1828,9 +1840,10 @@ export const test = async () => {
 
     // Test invalid actions when in map vote state
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
-    assert.deepEqual(addPlayer(testChannel1, "1"), [
-      "Can't add <@1> right now. Ignoring.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: ["Can't add <@1> right now. Ignoring."],
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [
       "Can't remove <@1> right now. Ignoring.",
     ]);
@@ -1870,9 +1883,10 @@ export const test = async () => {
 
     // Check invalid commands when looking for server and setting map
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
-    assert.deepEqual(addPlayer(testChannel1, "1"), [
-      "Can't add <@1> right now. Ignoring.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: ["Can't add <@1> right now. Ignoring."],
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [
       "Can't remove <@1> right now. Ignoring.",
     ]);
@@ -1921,20 +1935,19 @@ export const test = async () => {
 
   const testReadyTimeout = async () => {
     // Start a second game by adding a player to test ready up timeout
-    assert.deepEqual(addPlayer(testChannel1, "1"), [
-      NEW_GAME_STARTED,
-      "Added: <@1>",
-      ...getStatus(testChannel1),
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "1"), {
+      isFull: false,
+      msgs: [NEW_GAME_STARTED, "Added: <@1>", ...getStatus(testChannel1)],
+    });
 
     assert(store.getState().games[testChannel1].state === GameState.AddRemove);
 
     // Add another 10 players ( total 11)
     for (let x = 1; x < 11; x++) {
-      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-        `Added: <@${x + 1}>`,
-        ...getStatus(testChannel1),
-      ]);
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), {
+        isFull: false,
+        msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
+      });
       await sleep(10); // Get a different timestamp for each player
     }
 
@@ -1958,19 +1971,21 @@ export const test = async () => {
     }
 
     // Add last player
-    assert.deepEqual(addPlayer(testChannel1, "12"), [
-      "Added: <@12>",
-      ...getStatus(testChannel1),
-      "The game is full.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "12"), {
+      isFull: true,
+      msgs: ["Added: <@12>", ...getStatus(testChannel1), "The game is full."],
+    });
+
+    await handleGameFull(testChannel1);
 
     assert(store.getState().games[testChannel1].state === GameState.ReadyCheck);
 
     // Test invalid states when waiting for players to ready up
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
-    assert.deepEqual(addPlayer(testChannel1, "12"), [
-      "Can't add <@12> right now. Ignoring.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "12"), {
+      isFull: false,
+      msgs: ["Can't add <@12> right now. Ignoring."],
+    });
     assert(
       mapVote(testChannel1, "invalid", testMap1),
       "Not in map voting phase. Ignoring vote."
@@ -1997,11 +2012,12 @@ export const test = async () => {
     );
 
     // Add a last player
-    assert.deepEqual(addPlayer(testChannel1, "12"), [
-      "Added: <@12>",
-      ...getStatus(testChannel1),
-      "The game is full.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "12"), {
+      isFull: true,
+      msgs: ["Added: <@12>", ...getStatus(testChannel1), "The game is full."],
+    });
+
+    await handleGameFull(testChannel1);
 
     // Wait for ready up timeout
     await sleep(overrideTimeout + 100);
@@ -2017,17 +2033,18 @@ export const test = async () => {
 
     // Add another 11 players to fill the game again
     for (let x = 0; x < 10; x++) {
-      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), [
-        `Added: <@${x + 1}>`,
-        ...getStatus(testChannel1),
-      ]);
+      assert.deepEqual(addPlayer(testChannel1, `${x + 1}`), {
+        isFull: false,
+        msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
+      });
       await sleep(10); // Get a different timestamp for each player
     }
-    assert.deepEqual(addPlayer(testChannel1, "11"), [
-      "Added: <@11>",
-      ...getStatus(testChannel1),
-      "The game is full.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel1, "11"), {
+      isFull: true,
+      msgs: ["Added: <@11>", ...getStatus(testChannel1), "The game is full."],
+    });
+
+    await handleGameFull(testChannel1);
 
     // All players should be ready now and the map vote should now be happening
     assert(store.getState().games[testChannel1].state === GameState.MapVote);
@@ -2042,26 +2059,38 @@ export const test = async () => {
       "Game mode set to ULTIDUO.",
     ]);
     assert.deepEqual(startGame(testChannel2), [NEW_GAME_STARTED]);
-    assert.deepEqual(addPlayer(testChannel2, "a"), [
-      "Added: <@a>",
-      "Status (1/4): <@a>:ballot_box_with_check: ",
-    ]);
+    assert.deepEqual(addPlayer(testChannel2, "a"), {
+      isFull: false,
+      msgs: ["Added: <@a>", "Status (1/4): <@a>:ballot_box_with_check: "],
+    });
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, "b"), [
-      "Added: <@b>",
-      "Status (2/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: ",
-    ]);
+    assert.deepEqual(addPlayer(testChannel2, "b"), {
+      isFull: false,
+      msgs: [
+        "Added: <@b>",
+        "Status (2/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: ",
+      ],
+    });
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, "c"), [
-      "Added: <@c>",
-      "Status (3/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: ",
-    ]);
+    assert.deepEqual(addPlayer(testChannel2, "c"), {
+      isFull: false,
+      msgs: [
+        "Added: <@c>",
+        "Status (3/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: ",
+      ],
+    });
     await sleep(10);
-    assert.deepEqual(addPlayer(testChannel2, "d"), [
-      "Added: <@d>",
-      "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
-      "The game is full.",
-    ]);
+    assert.deepEqual(addPlayer(testChannel2, "d"), {
+      isFull: true,
+      msgs: [
+        "Added: <@d>",
+        "Status (4/4): <@a>:ballot_box_with_check: <@b>:ballot_box_with_check: <@c>:ballot_box_with_check: <@d>:ballot_box_with_check: ",
+        "The game is full.",
+      ],
+    });
+
+    await handleGameFull(testChannel2);
+
     assert.deepEqual(mapVote(testChannel2, "a", "koth_ultiduo_r_b7"), [
       "You voted for koth_ultiduo_r_b7.",
     ]);
@@ -2076,12 +2105,17 @@ export const test = async () => {
     ]);
 
     // Check the winning map and num players
-    assert(
-      store.getState().games[testChannel2].state === GameState.FindingServer
+    assert.deepEqual(
+      store.getState().games[testChannel2].state,
+      GameState.FindingServer
     );
-    assert(store.getState().games[testChannel2].map === "ultiduo_baloo_v2");
-    assert(
-      Object.values(store.getState().games[testChannel2].players).length === 4
+    assert.deepEqual(
+      store.getState().games[testChannel2].map,
+      "ultiduo_baloo_v2"
+    );
+    assert.deepEqual(
+      Object.values(store.getState().games[testChannel2].players).length,
+      4
     );
   };
 
@@ -2113,6 +2147,8 @@ export const test = async () => {
 
     // Add last player to fill game
     addPlayer(testChannel3, "4");
+
+    await handleGameFull(testChannel3);
 
     assert(store.getState().games[testChannel3].state === GameState.ReadyCheck);
 

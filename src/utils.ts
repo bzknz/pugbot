@@ -20,3 +20,7 @@ export const orderRecentFiles = (dir: string) => {
     .map((file) => ({ file, mtime: fs.lstatSync(path.join(dir, file)).mtime }))
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 };
+
+export const sleep = (ms: number) => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
