@@ -571,7 +571,10 @@ const addPlayer = (
   const player: Player = {
     id: playerId,
     queuedAt: timestamp,
-    // readyUntil: game.mode === GameMode.Test ? timestamp - 1 : timestamp + DEFAULT_READY_FOR, // Force a ready from the one when using the test game mode
+    // readyUntil:
+    //   game.mode === GameMode.Test
+    //     ? timestamp - 1
+    //     : timestamp + DEFAULT_READY_FOR, // Force a ready from the one when using the test game mode
     readyUntil: timestamp + DEFAULT_READY_FOR,
     mapVote: null,
   };
@@ -1627,7 +1630,9 @@ export const run = () => {
         const components = getMapVoteButtons(channelId);
         await handleCommandReply(
           interaction,
-          ["Please click the map you want to play."],
+          [
+            "Please click the map you want to play. Click another to change your vote.",
+          ],
           true,
           components
         );
