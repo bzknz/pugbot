@@ -753,23 +753,14 @@ const handleAllReady = async (channelId: string) => {
 
   if (maps.length === 1) {
     // Special case for only one map (BBall)
-    await mapVoteComplete(channelId);
+    handleMapVoteComplete(channelId);
   } else if (numVotes === getGameModeNumPlayers(game.mode)) {
     // Special case that all players have already voted before the map vote timeout
-    await mapVoteComplete(channelId);
+    handleMapVoteComplete(channelId);
   } else {
     // If not all players vote within the time limit, tally votes.
     const mapVoteTimeout = setTimeout(async () => {
-      const game = getGame(channelId);
-      const players = getPlayers(game);
-      const numVotes = players.filter((p) => p.mapVote).length;
-
-      await sendMsg(
-        channelId,
-        `${numVotes}/${players.length} players voted within the time limit.`
-      );
-
-      await mapVoteComplete(channelId);
+      handleMapVoteComplete(channelId);
     }, MAP_VOTE_TIMEOUT);
 
     updateGame(channelId, {
@@ -1177,7 +1168,7 @@ const getMapVoteCounts = (channelId: string) => {
   return voteCounts;
 };
 
-const mapVoteComplete = async (channelId: string) => {
+const handleMapVoteComplete = async (channelId: string) => {
   const msgs: Msg[] = [];
   const existingGame = getGame(channelId);
   const maps = getGameModeMaps(existingGame.mode);
@@ -1188,6 +1179,16 @@ const mapVoteComplete = async (channelId: string) => {
       `:map: **Playing ${winningMap} as it's the only available map.**`
     );
   } else {
+    const game = getGame(channelId);
+    const players = getPlayers(game);
+    const numVotes = players.filter((p) => p.mapVote).length;
+    if (numVotes === getGameModeNumPlayers(game.mode)) {
+      msgs.push("All players voted.");
+    } else {
+      msgs.push(
+        `${numVotes}/${players.length} players voted within the time limit.`
+      );
+    }
     const voteCounts = getMapVoteCounts(channelId);
     const maxVoteCount = Math.max(...Object.values(voteCounts));
     const withMaxVotes = Object.entries(voteCounts)
@@ -1285,7 +1286,7 @@ const mapVoteComplete = async (channelId: string) => {
     );
   }
 
-  // Set timers to null if they are set (can't stringify)
+  // Set timers to null if they are set (can't stringify for saving in a `.json` file)
   updateGame(channelId, { readyTimeout: null, mapVoteTimeout: null });
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
@@ -1328,11 +1329,11 @@ const mapVote = (
   channelId: string,
   playerId: string,
   mapVote: string
-): Msg[] => {
+): { msgs: Msg[]; allVoted: boolean } => {
   const allowedStatus = getCanVote(channelId, playerId);
 
   if (!allowedStatus.isAllowed) {
-    return [allowedStatus.msg];
+    return { msgs: [allowedStatus.msg], allVoted: false };
   }
 
   store.dispatch({
@@ -1340,25 +1341,23 @@ const mapVote = (
     payload: { channelId, playerId, mapVote },
   });
 
-  // Notify users about player vote
+  const msgs = [`You voted for ${mapVote}.`];
+
   const game = getGame(channelId);
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
   if (
     game.state === GameState.MapVote &&
     numVotes === getGameModeNumPlayers(game.mode)
   ) {
+    // All players voted in the alloted time
     if (game.mapVoteTimeout) {
       clearTimeout(game.mapVoteTimeout);
       updateGame(channelId, { mapVoteTimeout: null });
     }
-    // All players voted in the alloted time
-    setTimeout(async () => {
-      await sendMsg(channelId, `All players have voted.`);
-    });
-    mapVoteComplete(channelId);
+    return { msgs, allVoted: true };
   }
 
-  return [`You voted for ${mapVote}.`];
+  return { msgs, allVoted: false };
 };
 
 const getIsPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
@@ -1655,8 +1654,11 @@ export const run = () => {
 
     if (customId.includes(MAP_VOTE_PREFIX)) {
       const map = customId.split(MAP_VOTE_PREFIX)[1];
-      const msgs = mapVote(channelId, playerId, map);
+      const { msgs, allVoted } = mapVote(channelId, playerId, map);
       await handleButtonReply(interaction, msgs, true);
+      if (allVoted) {
+        handleMapVoteComplete(channelId);
+      }
     } else if (customId === READY_BUTTON) {
       const { msgs, allReady } = readyPlayer(
         channelId,
@@ -1717,9 +1719,10 @@ export const test = async () => {
       msgs: [CHANNEL_NOT_SET_UP],
       allReady: false,
     });
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      CHANNEL_NOT_SET_UP,
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: [CHANNEL_NOT_SET_UP],
+      allVoted: false,
+    });
     assert.deepEqual(stopGame(testChannel1), [CHANNEL_NOT_SET_UP]);
     assert.deepEqual(getStatus(testChannel1), [CHANNEL_NOT_SET_UP]);
     assert.deepEqual(getMaps(testChannel1), [CHANNEL_NOT_SET_UP]);
@@ -1731,9 +1734,10 @@ export const test = async () => {
     ]);
 
     // Test invalid commands when channel set up but no game started
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      NO_GAME_STARTED,
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: [NO_GAME_STARTED],
+      allVoted: false,
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
     assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
       msgs: [NO_GAME_STARTED],
@@ -1785,9 +1789,10 @@ export const test = async () => {
 
     // Test invalid commands right after new game started
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      "You are not added. Ignoring vote.",
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: ["You are not added. Ignoring vote."],
+      allVoted: false,
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [
       "<@1> is not added. Ignoring.",
     ]);
@@ -1883,18 +1888,22 @@ export const test = async () => {
       msgs: ["Can't ready <@1> right now. Ignoring."],
       allReady: false,
     });
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      "You are not added. Ignoring vote.",
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: ["You are not added. Ignoring vote."],
+      allVoted: false,
+    });
     assert.deepEqual(stopGame(testChannel1), ["Can't stop the game now."]);
 
     // Players vote for one of three maps (even distribution)
     for (let x = 0; x < 12; x++) {
       const map = x < 4 ? testMap1 : x < 8 ? testMap2 : testMap3;
-      assert.deepEqual(mapVote(testChannel1, `${x + 1}`, map), [
-        `You voted for ${map}.`,
-      ]);
+      assert.deepEqual(mapVote(testChannel1, `${x + 1}`, map), {
+        msgs: [`You voted for ${map}.`],
+        allVoted: x == 11,
+      });
     }
+
+    handleMapVoteComplete(testChannel1);
 
     // Check the winning map one of the three test maps (should be randomly selected)
     const compareMapsTo = [testMap1, testMap2, testMap3] as string[];
@@ -1927,12 +1936,14 @@ export const test = async () => {
       msgs: ["Can't ready <@1> right now. Ignoring."],
       allReady: false,
     });
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      "You are not added. Ignoring vote.",
-    ]);
-    assert.deepEqual(mapVote(testChannel1, "1", testMap1), [
-      "You cannot vote now. Ignoring vote.",
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: ["You are not added. Ignoring vote."],
+      allVoted: false,
+    });
+    assert.deepEqual(mapVote(testChannel1, "1", testMap1), {
+      msgs: ["You cannot vote now. Ignoring vote."],
+      allVoted: false,
+    });
     assert.deepEqual(stopGame(testChannel1), ["Can't stop the game now."]);
 
     // Wait for async work to complete (looking for server + setting map)
@@ -1952,9 +1963,10 @@ export const test = async () => {
     assert(Object.values(storedGame.players).length === 12);
 
     // Test invalid after game has been completed and another has not started yet
-    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
-      NO_GAME_STARTED,
-    ]);
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: [NO_GAME_STARTED],
+      allVoted: false,
+    });
     assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
     assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
       msgs: [NO_GAME_STARTED],
@@ -2018,11 +2030,11 @@ export const test = async () => {
       isFull: false,
       msgs: ["Can't add <@12> right now. Ignoring."],
     });
-    assert(
-      mapVote(testChannel1, "invalid", testMap1),
-      "Not in map voting phase. Ignoring vote."
-    );
-    assert(stopGame(testChannel1), "Can't stop the game now.");
+    assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), {
+      msgs: ["You are not added. Ignoring vote."],
+      allVoted: false,
+    });
+    assert.deepEqual(stopGame(testChannel1), ["Can't stop the game now."]);
 
     // Readying up a player should work at this stage
     assert(
@@ -2123,18 +2135,24 @@ export const test = async () => {
 
     await handleGameFull(testChannel2);
 
-    assert.deepEqual(mapVote(testChannel2, "a", "koth_ultiduo_r_b7"), [
-      "You voted for koth_ultiduo_r_b7.",
-    ]);
-    assert.deepEqual(mapVote(testChannel2, "b", "ultiduo_baloo_v2"), [
-      "You voted for ultiduo_baloo_v2.",
-    ]);
-    assert.deepEqual(mapVote(testChannel2, "c", "ultiduo_baloo_v2"), [
-      "You voted for ultiduo_baloo_v2.",
-    ]);
-    assert.deepEqual(mapVote(testChannel2, "d", "ultiduo_baloo_v2"), [
-      "You voted for ultiduo_baloo_v2.",
-    ]);
+    assert.deepEqual(mapVote(testChannel2, "a", "koth_ultiduo_r_b7"), {
+      msgs: ["You voted for koth_ultiduo_r_b7."],
+      allVoted: false,
+    });
+    assert.deepEqual(mapVote(testChannel2, "b", "ultiduo_baloo_v2"), {
+      msgs: ["You voted for ultiduo_baloo_v2."],
+      allVoted: false,
+    });
+    assert.deepEqual(mapVote(testChannel2, "c", "ultiduo_baloo_v2"), {
+      msgs: ["You voted for ultiduo_baloo_v2."],
+      allVoted: false,
+    });
+    assert.deepEqual(mapVote(testChannel2, "d", "ultiduo_baloo_v2"), {
+      msgs: ["You voted for ultiduo_baloo_v2."],
+      allVoted: true,
+    });
+
+    handleMapVoteComplete(testChannel2);
 
     // Check the winning map and num players
     assert.deepEqual(
