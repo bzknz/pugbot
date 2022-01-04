@@ -1231,7 +1231,7 @@ const mapVoteComplete = async (channelId: string) => {
 
     await sendMsg(
       channelId,
-      `:handshake: Found server: ${server.name} (${server.socketAddress}). Attempting to set the map to **${winningMap}**...`
+      `:handshake: Found server: ${server.name} (\`${server.socketAddress}\`). Attempting to set the map to **${winningMap}**...`
     );
 
     const setMapStatus = await setMapOnServer(server.socketAddress, winningMap);
@@ -1250,7 +1250,7 @@ const mapVoteComplete = async (channelId: string) => {
     sendMsg(
       channelId,
       `:fireworks: **Good to go. Join the server now. Check your DMs for a link to join.**`,
-      `${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
+      `Join now: ${playerIds.map((p) => mentionPlayer(p)).join(" ")}`
     );
 
     for (const playerId of playerIds) {
