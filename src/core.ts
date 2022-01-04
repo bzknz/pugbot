@@ -596,7 +596,7 @@ const handleGameFull = async (channelId: string) => {
   // Check if all players are ready
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   if (unreadyPlayerIds.length === 0) {
-    await handlePlayersReady(channelId);
+    await handleAllReady(channelId);
   } else {
     await handleUnreadyPlayers(channelId);
   }
@@ -731,7 +731,7 @@ const getMapVoteButtons = (channelId: string): Discord.MessageActionRow[] => {
   return rows;
 };
 
-const handlePlayersReady = async (channelId: string) => {
+const handleAllReady = async (channelId: string) => {
   // All players are now ready - start map vote
   removePlayersFromOtherGames(channelId);
 
@@ -745,8 +745,17 @@ const handlePlayersReady = async (channelId: string) => {
 
   const maps = getGameModeMaps(existingGame.mode);
 
+  // Players can vote while the game is filling up (and during the ready check)
+  // Potentially all players have voted before the voting timeout
+  const game = getGame(channelId);
+  const players = getPlayers(game);
+  const numVotes = players.filter((p) => p.mapVote).length;
+
   if (maps.length === 1) {
     // Special case for only one map (BBall)
+    await mapVoteComplete(channelId);
+  } else if (numVotes === getGameModeNumPlayers(game.mode)) {
+    // Special case that all players have already voted before the map vote timeout
     await mapVoteComplete(channelId);
   } else {
     // If not all players vote within the time limit, tally votes.
@@ -873,27 +882,33 @@ const readyPlayer = (
   channelId: string,
   playerId: string,
   time: number
-): Msg[] => {
+): { msgs: Msg[]; allReady: boolean } => {
   // Ready the player up and then check if all players are ready
   const channel = getChannel(channelId);
   if (!channel) {
-    return [CHANNEL_NOT_SET_UP];
+    return { msgs: [CHANNEL_NOT_SET_UP], allReady: false };
   }
 
   const existingGame = getGame(channelId);
   if (!existingGame) {
-    return [NO_GAME_STARTED];
+    return { msgs: [NO_GAME_STARTED], allReady: false };
   }
 
   if (
     ![GameState.AddRemove, GameState.ReadyCheck].includes(existingGame.state)
   ) {
-    return [`Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`];
+    return {
+      msgs: [`Can't ready ${mentionPlayer(playerId)} right now. Ignoring.`],
+      allReady: false,
+    };
   }
 
   const isAdded = getIsPlayerAdded(channelId, playerId);
   if (!isAdded) {
-    return [`${mentionPlayer(playerId)} is not added. Ignoring.`];
+    return {
+      msgs: [`${mentionPlayer(playerId)} is not added. Ignoring.`],
+      allReady: false,
+    };
   }
 
   const now = Date.now();
@@ -908,20 +923,21 @@ const readyPlayer = (
 
   const game = getGame(channelId);
 
+  const msgs = [
+    `${mentionPlayer(playerId)} is ready for ${Math.round(
+      normalizedTime / 1000 / 60
+    )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`,
+  ];
+
   // Check if this ready up means all players are ready
   if (game.state === GameState.ReadyCheck) {
     // If the game is full
     const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
     if (unreadyPlayerIds.length === 0) {
-      handlePlayersReady(channelId);
+      return { msgs, allReady: true };
     }
   }
-
-  return [
-    `${mentionPlayer(playerId)} is ready for ${Math.round(
-      normalizedTime / 1000 / 60
-    )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`,
-  ];
+  return { msgs, allReady: false };
 };
 
 const splitSocketAddress = (
@@ -1351,7 +1367,7 @@ const getIsPlayerReady = (unreadyAfter: number, playerReadyUntil: number) =>
 const sortPlayers = (a: Player, b: Player) =>
   a.queuedAt <= b.queuedAt ? -1 : 1;
 
-const getPlayers = (game: Game) =>
+const getPlayers = (game: Game): Player[] =>
   Object.values(game.players).sort(sortPlayers);
 
 const getUnreadyPlayerIds = (channelId: string): string[] => {
@@ -1552,8 +1568,11 @@ export const run = () => {
       case Commands.Ready: {
         const minutesIn = interaction.options.getNumber("minutes");
         const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
-        const msgs = readyPlayer(channelId, playerId, readyFor);
+        const { msgs, allReady } = readyPlayer(channelId, playerId, readyFor);
         await handleCommandReply(interaction, msgs);
+        if (allReady) {
+          await handleAllReady(channelId);
+        }
         break;
       }
       case Commands.Vacate: {
@@ -1639,8 +1658,15 @@ export const run = () => {
       const msgs = mapVote(channelId, playerId, map);
       await handleButtonReply(interaction, msgs, true);
     } else if (customId === READY_BUTTON) {
-      const msgs = readyPlayer(channelId, playerId, DEFAULT_READY_FOR);
+      const { msgs, allReady } = readyPlayer(
+        channelId,
+        playerId,
+        DEFAULT_READY_FOR
+      );
       await handleButtonReply(interaction, msgs, true);
+      if (allReady) {
+        await handleAllReady(channelId);
+      }
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
       if (getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
         await interaction.deferReply();
@@ -1687,9 +1713,10 @@ export const test = async () => {
       msgs: [CHANNEL_NOT_SET_UP],
     });
     assert.deepEqual(removePlayer(testChannel1, "1"), [CHANNEL_NOT_SET_UP]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      CHANNEL_NOT_SET_UP,
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: [CHANNEL_NOT_SET_UP],
+      allReady: false,
+    });
     assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
       CHANNEL_NOT_SET_UP,
     ]);
@@ -1708,9 +1735,10 @@ export const test = async () => {
       NO_GAME_STARTED,
     ]);
     assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      NO_GAME_STARTED,
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: [NO_GAME_STARTED],
+      allReady: false,
+    });
     assert.deepEqual(stopGame(testChannel1), [NO_GAME_STARTED]);
     assert.deepEqual(getStatus(testChannel1), [NO_GAME_STARTED]);
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
@@ -1766,9 +1794,10 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [
       "<@1> is not added. Ignoring.",
     ]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      "<@1> is not added. Ignoring.",
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: ["<@1> is not added. Ignoring."],
+      allReady: false,
+    });
 
     // Add 11 Status (not full)
     for (let x = 0; x < 11; x++) {
@@ -1786,14 +1815,14 @@ export const test = async () => {
 
     // Ready player 11
     assert(
-      readyPlayer(testChannel1, "11", DEFAULT_READY_FOR)[0].includes(
+      readyPlayer(testChannel1, "11", DEFAULT_READY_FOR).msgs[0].includes(
         "<@11> is ready for 10min (until "
       )
     );
 
     // Test ready player that is not added
     assert(
-      readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR)[0].includes(
+      readyPlayer(testChannel1, "invalid", DEFAULT_READY_FOR).msgs[0].includes(
         "<@invalid> is not added. Ignoring."
       )
     );
@@ -1850,9 +1879,10 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [
       "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      "Can't ready <@1> right now. Ignoring.",
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: ["Can't ready <@1> right now. Ignoring."],
+      allReady: false,
+    });
     assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
       "You are not added. Ignoring vote.",
     ]);
@@ -1893,9 +1923,10 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [
       "Can't remove <@1> right now. Ignoring.",
     ]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      "Can't ready <@1> right now. Ignoring.",
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: ["Can't ready <@1> right now. Ignoring."],
+      allReady: false,
+    });
     assert.deepEqual(mapVote(testChannel1, "invalid", testMap1), [
       "You are not added. Ignoring vote.",
     ]);
@@ -1925,9 +1956,10 @@ export const test = async () => {
       NO_GAME_STARTED,
     ]);
     assert.deepEqual(removePlayer(testChannel1, "1"), [NO_GAME_STARTED]);
-    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), [
-      NO_GAME_STARTED,
-    ]);
+    assert.deepEqual(readyPlayer(testChannel1, "1", DEFAULT_READY_FOR), {
+      msgs: [NO_GAME_STARTED],
+      allReady: false,
+    });
     assert.deepEqual(stopGame(testChannel1), [NO_GAME_STARTED]);
     assert.deepEqual(getStatus(testChannel1), [NO_GAME_STARTED]);
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
@@ -1994,7 +2026,7 @@ export const test = async () => {
 
     // Readying up a player should work at this stage
     assert(
-      readyPlayer(testChannel1, "12", DEFAULT_READY_FOR)[0].includes(
+      readyPlayer(testChannel1, "12", DEFAULT_READY_FOR).msgs[0].includes(
         "<@12> is ready for 10min (until "
       )
     );
