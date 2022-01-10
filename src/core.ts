@@ -564,7 +564,7 @@ const addPlayer = (
       `Bug: More than total num players added to game in channelId: ${channelId}.`
     );
     return {
-      msgs: [`Bug: More than total num players added to game`],
+      msgs: [`The game is full. Ignoring.`],
       isFull: false,
     };
   }
