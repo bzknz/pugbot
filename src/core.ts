@@ -114,6 +114,7 @@ type Game = {
   players: Players;
   readyCheckAt: null | number; // Used to track player readiness to a static value
   readyTimeout: null | NodeJS.Timeout;
+  readyMessage: null | Discord.Message<boolean>; // To be edited with current unready players status
   mapVoteAt: null | number;
   mapVoteTimeout: null | NodeJS.Timeout;
   map: null | string;
@@ -479,6 +480,7 @@ const startGame = (channelId: string): Msg[] => {
     players: {},
     readyCheckAt: null,
     readyTimeout: null,
+    readyMessage: null,
     mapVoteAt: null,
     mapVoteTimeout: null,
     map: null,
@@ -605,6 +607,43 @@ const handleGameFull = async (channelId: string) => {
   }
 };
 
+const getUnreadyMsg = (channelId: string): Discord.MessageOptions => {
+  const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
+  const numUnready = unreadyPlayerIds.length;
+
+  if (numUnready === 0) {
+    const embed = embedMsg(`Everyone is ready!`);
+    return {
+      embeds: [embed],
+      components: [],
+      content: null,
+    };
+  } else {
+    const row = new MessageActionRow().addComponents(
+      new MessageButton()
+        .setCustomId(READY_BUTTON)
+        .setLabel("Ready up!")
+        .setStyle("SUCCESS")
+    );
+
+    const embed = embedMsg(
+      `:hourglass: ${
+        unreadyPlayerIds.length
+      } player(s) are not ready. Waiting ${
+        READY_TIMEOUT / 1000
+      } seconds for them. Click the button (or use \`/ready\`) to ready up.`
+    );
+
+    return {
+      embeds: [embed],
+      components: [row],
+      content: `Unready: ${unreadyPlayerIds
+        .map((p) => mentionPlayer(p))
+        .join(" ")}`,
+    };
+  }
+};
+
 const handleUnreadyPlayers = async (channelId: string) => {
   // Setup timeout if not all players ready up in time.
   const readyTimeout = setTimeout(async () => {
@@ -633,40 +672,21 @@ const handleUnreadyPlayers = async (channelId: string) => {
   updateGame(channelId, { state: GameState.ReadyCheck, readyTimeout });
 
   // Ask unready players to ready
-  const row = new MessageActionRow().addComponents(
-    new MessageButton()
-      .setCustomId(READY_BUTTON)
-      .setLabel("Ready up!")
-      .setStyle("SUCCESS")
-  );
-
   const channel = getDiscordChannel(channelId);
-
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
-  const embed = embedMsg(
-    `:hourglass: ${unreadyPlayerIds.length} player(s) are not ready. Waiting ${
-      READY_TIMEOUT / 1000
-    } seconds for them. Click the button (or use \`/ready\`) to ready up.`
-  );
+  const unreadyMsg = getUnreadyMsg(channelId);
 
   if (channel?.isText()) {
     const gameMode = getGame(channelId).mode;
-    await channel
-      .send({
-        embeds: [embed],
-        components: [row],
-        content: `Unready: ${unreadyPlayerIds
-          .map((p) => mentionPlayer(p))
-          .join(" ")}`,
-      })
-      .then((embed) => {
-        for (const unreadyPlayerId of unreadyPlayerIds) {
-          sendDM(
-            unreadyPlayerId,
-            `Please ready up for you ${gameMode} PUG: ${embed.url}`
-          );
-        }
-      });
+    await channel.send(unreadyMsg).then((msg) => {
+      updateGame(channelId, { readyMessage: msg }); // Store the ready message so it can be updated if need be
+      for (const unreadyPlayerId of unreadyPlayerIds) {
+        sendDM(
+          unreadyPlayerId,
+          `Please ready up for you ${gameMode} PUG: ${msg.url}`
+        );
+      }
+    });
   }
 };
 
@@ -922,6 +942,12 @@ const readyPlayer = (
       normalizedTime / 1000 / 60
     )}min (until ${readyUntilDate.toLocaleTimeString("en-ZA")}).`,
   ];
+
+  // Edit/update the ready up message to show the current unready players
+  if (game.state === GameState.ReadyCheck && game.readyMessage) {
+    const unreadyMsg = getUnreadyMsg(channelId);
+    game.readyMessage.edit(unreadyMsg);
+  }
 
   // Check if this ready up means all players are ready
   if (game.state === GameState.ReadyCheck) {
@@ -1290,7 +1316,11 @@ const handleMapVoteComplete = async (channelId: string) => {
   }
 
   // Set timers to null if they are set (can't stringify for saving in a `.json` file)
-  updateGame(channelId, { readyTimeout: null, mapVoteTimeout: null });
+  updateGame(channelId, {
+    readyTimeout: null,
+    mapVoteTimeout: null,
+    readyMessage: null,
+  });
 
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
   const game = getGame(channelId);
