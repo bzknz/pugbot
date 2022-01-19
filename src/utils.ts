@@ -24,3 +24,8 @@ export const orderRecentFiles = (dir: string) => {
 export const sleep = (ms: number) => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+export function getRandomElInArray<T>(arr: T[]): T {
+  const randIndex = Math.round(Math.random() * (arr.length - 1));
+  return arr[randIndex];
+}

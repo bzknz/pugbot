@@ -54,7 +54,7 @@ const run = async () => {
       ),
     new SlashCommandBuilder()
       .setName(Commands.Ready)
-      .setDescription("Ready up")
+      .setDescription("Ready up with optional number of minutes.")
       .addNumberOption((option) =>
         option
           .setName("minutes")

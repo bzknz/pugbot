@@ -16,7 +16,7 @@
     "@types/gamedig": "^3.0.1",
     "discord-api-types": "^0.26.1",
     "discord.js": "^13.3.1",
-    "dotenv": "^10.0.0",
+    "dotenv": "^14.2.0",
     "gamedig": "^3.0.8",
     "rcon": "^1.1.0",
     "redux": "^4.1.2",
