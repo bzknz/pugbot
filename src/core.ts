@@ -651,11 +651,11 @@ const addPlayer = (
   const player: Player = {
     id: playerId,
     queuedAt: timestamp,
-    readyUntil:
-      game.mode === GameMode.Test
-        ? timestamp - 1
-        : timestamp + DEFAULT_READY_FOR, // Force a ready from the one when using the test game mode
-    // readyUntil: timestamp + DEFAULT_READY_FOR,
+    // readyUntil:
+    //   game.mode === GameMode.Test
+    //     ? timestamp - 1
+    //     : timestamp + DEFAULT_READY_FOR, // Force a ready from the one when using the test game mode
+    readyUntil: timestamp + DEFAULT_READY_FOR,
     mapVote: null,
   };
 
