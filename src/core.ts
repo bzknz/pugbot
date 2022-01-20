@@ -596,7 +596,6 @@ enum AfterAdd {
   NotFull,
   FullAndNotReady,
   FullAllReadyOneMap,
-  FullAllReadyAllVoted,
   FullAllReadyMapVote,
 }
 
@@ -680,10 +679,8 @@ const addPlayer = (
         case AllReadyStatus.OneMap: {
           return { msgs, status: AfterAdd.FullAllReadyOneMap };
         }
-        case AllReadyStatus.AllVoted: {
-          return { msgs, status: AfterAdd.FullAllReadyAllVoted };
-        }
-        case AllReadyStatus.MapVote: {
+        case AllReadyStatus.MapVote:
+        default: {
           return { msgs, status: AfterAdd.FullAllReadyMapVote };
         }
       }
@@ -1686,10 +1683,6 @@ export const run = () => {
           }
           case AfterAdd.FullAllReadyOneMap: {
             handleAllReadyOneMap(channelId);
-            break;
-          }
-          case AfterAdd.FullAllReadyAllVoted: {
-            handleAllReadyAllVoted(channelId);
             break;
           }
           case AfterAdd.FullAllReadyMapVote: {
