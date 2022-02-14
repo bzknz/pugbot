@@ -1900,7 +1900,7 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
     assert.deepEqual(getMaps(testChannel1), [
-      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f3\ncp_metalworks\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_rcx",
+      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f6\ncp_metalworks_f2\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
     ]);
 
     // Start a game with /add
