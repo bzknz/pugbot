@@ -538,17 +538,23 @@ enum AllReadyStatus {
 
 const handleVoteComplete = (channelId: string) => {
   const { winningMaps, maxVoteCount } = getWinningMapsFromVotes(channelId);
-  if (winningMaps.length > 1) {
-    const map = getRandomElInArray(winningMaps);
-    updateGame(channelId, {
-      map,
-      winningMaps: winningMaps,
-      maxVoteCount,
-    });
+
+  const nextGameState = {
+    winningMaps,
+    maxVoteCount,
+    state: GameState.FindingServer,
+  };
+
+  let map = null;
+  if (maxVoteCount === 0 || winningMaps.length > 1) {
+    // If no votes recieved or there is more than one map that tied for the win
+    map = getRandomElInArray(winningMaps);
   } else {
-    updateGame(channelId, { map: winningMaps[0], maxVoteCount });
+    // If there is only one map with the most votes (won the vote)
+    map = winningMaps[0];
   }
-  updateGame(channelId, { state: GameState.FindingServer });
+
+  updateGame(channelId, { ...nextGameState, map });
 };
 
 const handleAllReady = (channelId: string): AllReadyStatus => {
@@ -579,7 +585,8 @@ const handleAllReady = (channelId: string): AllReadyStatus => {
     return AllReadyStatus.AllVoted;
   } else {
     const mapVoteTimeout = setTimeout(() => {
-      handleMapVoteComplete(channelId);
+      handleVoteComplete(channelId);
+      handleSendMapVoteResult(channelId);
     }, MAP_VOTE_TIMEOUT);
 
     updateGame(channelId, {
@@ -880,21 +887,16 @@ const handleAllReadyOneMap = async (channelId: string) => {
   handleFindServer(channelId);
 };
 
-const handleMapVoteComplete = async (channelId: string) => {
+const handleSendMapVoteResult = async (channelId: string) => {
   const game = getGame(channelId);
-  if (!game.map) {
-    // Special case for handling no votes
-    const maps = getGameModeMaps(game.mode);
-    const winningMap = getRandomElInArray(maps);
-
-    updateGame(channelId, { map: winningMap, maxVoteCount: 0 });
-
+  if (game.maxVoteCount === 0) {
+    // No votes were recieved. The map has already been randomly selected.
     await sendMsg(
       channelId,
-      `No votes received.\n\n:map: **${winningMap} was randomly selected as the winner.**`
+      `No votes received.\n\n:map: **${game.map} was randomly selected as the winner.**`
     );
   } else if (game.winningMaps && game.winningMaps.length > 1) {
-    // Pick a random map from the winners
+    // Multiple maps tied for the win. The map has already been randomly selected.
     await sendMsg(
       channelId,
       `${game.winningMaps.join(", ")} tied with ${
@@ -904,6 +906,7 @@ const handleMapVoteComplete = async (channelId: string) => {
       } was randomly selected as the winner.**`
     );
   } else {
+    // Only one map won the vote
     await sendMsg(
       channelId,
       `:map: **${game.map}** won with ${game.maxVoteCount} vote(s).`
@@ -914,7 +917,7 @@ const handleMapVoteComplete = async (channelId: string) => {
 
 const handleAllReadyAllVoted = async (channelId: string) => {
   await sendMsg(channelId, ALL_READY_MSG);
-  handleMapVoteComplete(channelId);
+  handleSendMapVoteResult(channelId);
 };
 
 const sendMapVoteButtons = (channelId: string) => {
@@ -1809,7 +1812,7 @@ export const run = () => {
 
       switch (status) {
         case AfterVote.AllVoted: {
-          handleMapVoteComplete(channelId);
+          handleSendMapVoteResult(channelId);
           break;
         }
       }
@@ -1962,7 +1965,7 @@ export const test = async () => {
         status: AfterAdd.NotFull,
         msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
       });
-      await sleep(10); // Get a different timestamp for each player
+      await sleep(10); // Force a different timestamp for each player to check status
     }
 
     // Check status
@@ -2004,7 +2007,6 @@ export const test = async () => {
         status: AfterAdd.NotFull,
         msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
       });
-      await sleep(10); // Get a different timestamp for each player
     }
 
     assert.deepEqual(addPlayer(testChannel1, "12"), {
@@ -2072,7 +2074,7 @@ export const test = async () => {
     );
 
     // Now the bot should look for an available server and set the map on the server
-    handleMapVoteComplete(testChannel1);
+    handleSendMapVoteResult(testChannel1);
 
     // Check invalid commands when looking for server and setting map
     assert.deepEqual(startGame(testChannel1), [GAME_ALREADY_STARTED]);
@@ -2146,7 +2148,6 @@ export const test = async () => {
         status: AfterAdd.NotFull,
         msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
       });
-      await sleep(10); // Get a different timestamp for each player
     }
 
     // Check for 11 players
@@ -2234,7 +2235,6 @@ export const test = async () => {
         status: AfterAdd.NotFull,
         msgs: [`Added: <@${x + 1}>`, ...getStatus(testChannel1)],
       });
-      await sleep(10); // Get a different timestamp for each player
     }
     assert.deepEqual(addPlayer(testChannel1, "11"), {
       status: AfterAdd.FullAllReadyMapVote,
@@ -2246,6 +2246,9 @@ export const test = async () => {
     assert(
       Object.values(store.getState().games[testChannel1].players).length === 12
     );
+
+    // Wait for find server, change map etc
+    await sleep(MOCK_ASYNC_SLEEP_FOR * 3);
   };
 
   const testUltiduo = async () => {
@@ -2315,7 +2318,7 @@ export const test = async () => {
       4
     );
 
-    handleMapVoteComplete(testChannel2);
+    handleSendMapVoteResult(testChannel2);
   };
 
   const testUnreadyDuringReadyTimeout = async () => {
@@ -2371,8 +2374,48 @@ export const test = async () => {
     assert(store.getState().games[testChannel3].players["3"] !== undefined);
   };
 
+  const testMapVoteTimeout = async () => {
+    // Test correct map being selected when at least one player does not vote for a map
+    // Test player becoming unready while readying up players.
+    // Add all players to enter map vote stage
+    setGameMode(testChannel1, GameMode.Sixes);
+
+    for (let x = 0; x < 12; x++) {
+      addPlayer(testChannel1, `${x + 1}`);
+    }
+
+    assert.deepEqual(
+      store.getState().games[testChannel1].state,
+      GameState.MapVote
+    );
+
+    assert.deepEqual(mapVote(testChannel1, "2", testMap1), {
+      msgs: [`You voted for ${testMap1}.`],
+      status: AfterVote.NotAllVoted,
+    });
+
+    // Wait for map vote timeout
+    await sleep(MAP_VOTE_TIMEOUT);
+
+    // Wait for find server set map etc
+    await sleep(MOCK_ASYNC_SLEEP_FOR * 3);
+
+    // Check the stored JSON file (game state)
+    const storedGame: Game = JSON.parse(
+      fs.readFileSync(
+        `${GAMES_PATH}/${orderRecentFiles(GAMES_PATH)[0].file}`,
+        "utf-8"
+      )
+    );
+
+    assert.deepEqual(storedGame.maxVoteCount, 1);
+    assert.deepEqual(storedGame.winningMaps, [testMap1]);
+    assert.deepEqual(storedGame.map, testMap1);
+  };
+
   await testGame();
   await testReadyTimeout();
   await testUltiduo();
   await testUnreadyDuringReadyTimeout();
+  await testMapVoteTimeout();
 };
