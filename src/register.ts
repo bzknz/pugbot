@@ -20,11 +20,13 @@ const run = async () => {
           .setName("mode")
           .setDescription("The game mode to run in this channel.")
           .setRequired(true)
-          .addChoice(GameMode.BBall, GameMode.BBall)
-          .addChoice(GameMode.Highlander, GameMode.Highlander)
-          .addChoice(GameMode.Sixes, GameMode.Sixes)
-          .addChoice(GameMode.Ultiduo, GameMode.Ultiduo)
-          .addChoice(GameMode.Test, GameMode.Test)
+          .addChoices(
+            { name: GameMode.BBall, value: GameMode.BBall },
+            { name: GameMode.Highlander, value: GameMode.Highlander },
+            { name: GameMode.Sixes, value: GameMode.Sixes },
+            { name: GameMode.Ultiduo, value: GameMode.Ultiduo },
+            { name: GameMode.Test, value: GameMode.Test }
+          )
       ),
     new SlashCommandBuilder()
       .setName(Commands.Start)
