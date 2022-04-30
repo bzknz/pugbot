@@ -82,6 +82,7 @@ export enum Commands {
   Ready = "ready",
   MapVote = "vote",
   Stop = "stop",
+  Flip = "flip",
 }
 
 type Player = {
@@ -1791,6 +1792,11 @@ export const run = () => {
         );
 
         break;
+      }
+      case Commands.Flip: {
+        const result = Math.floor(Math.random() * 2);
+        const resultStr = result === 0 ? "Heads!" : "Tails!";
+        await handleCommandReply(interaction, [resultStr]);
       }
     }
   });

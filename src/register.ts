@@ -76,6 +76,9 @@ const run = async () => {
       .setDescription(
         "Vote for the map you want to play. You will be presented with button options."
       ),
+    new SlashCommandBuilder()
+      .setName(Commands.Flip)
+      .setDescription("Flip a coin."),
   ].map((command) => command.toJSON());
 
   const rest = new REST({ version: "9" }).setToken(token);
