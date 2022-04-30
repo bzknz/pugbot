@@ -1,4 +1,6 @@
+import { configureStore } from "@reduxjs/toolkit";
 import { strict as assert } from "assert";
+import { randomUUID } from "crypto";
 import Discord, {
   Intents,
   MessageActionRow,
@@ -10,7 +12,6 @@ import Discord, {
 import dotenv from "dotenv";
 import fs from "fs";
 import Gamedig from "gamedig";
-import { createStore } from "redux";
 import {
   filterObjectByKeys,
   getRandomElInArray,
@@ -70,6 +71,9 @@ const PLAYER_MAP_VOTE = "PLAYER_MAP_VOTE";
 
 const client = new Discord.Client({ intents: [Intents.FLAGS.GUILDS] });
 
+const timeoutMap = new Map<string, NodeJS.Timeout>();
+const msgMap = new Map<string, Discord.Message<boolean>>();
+
 export enum Commands {
   Setup = "setup",
   Start = "start",
@@ -118,10 +122,10 @@ type Game = {
   startedAt: number;
   players: Players;
   readyCheckAt: null | number; // Used to track player readiness to a static value
-  readyTimeout: null | NodeJS.Timeout;
-  readyMessage: null | Discord.Message<boolean>; // To be edited with current unready players status
+  readyTimeoutId: null | string; // UUID mapped to NodeJS timeout. Shouldn't store NodeJS Timeout in redux (non-serializable)
+  readyMsgId: null | string; // To be edited with current unready players status
   mapVoteAt: null | number;
-  mapVoteTimeout: null | NodeJS.Timeout;
+  mapVoteTimeoutId: null | string;
   winningMaps: null | string[]; // Set if there are multiple tied winning maps based on player votes
   maxVoteCount: null | number;
   map: null | string;
@@ -370,7 +374,7 @@ const reducer = (
   }
 };
 
-const store = createStore(reducer);
+const store = configureStore({ reducer });
 
 const getDiscordChannel = (channelId: string) =>
   client.channels.cache.get(channelId);
@@ -486,10 +490,10 @@ const startGame = (channelId: string): Msg[] => {
     startedAt: Date.now(),
     players: {},
     readyCheckAt: null,
-    readyTimeout: null,
-    readyMessage: null,
+    readyTimeoutId: null,
+    readyMsgId: null,
     mapVoteAt: null,
-    mapVoteTimeout: null,
+    mapVoteTimeoutId: null,
     winningMaps: null,
     maxVoteCount: null,
     map: null,
@@ -563,9 +567,14 @@ const handleAllReady = (channelId: string): AllReadyStatus => {
   removePlayersFromOtherGames(channelId);
 
   const existingGame = getGame(channelId);
-  if (existingGame.readyTimeout) {
-    clearTimeout(existingGame.readyTimeout);
-    updateGame(channelId, { readyTimeout: null });
+  const timeoutId = existingGame.readyTimeoutId;
+  if (timeoutId) {
+    const timeout = timeoutMap.get(timeoutId);
+    if (timeout) {
+      clearTimeout(timeout);
+      timeoutMap.delete(timeoutId);
+    }
+    updateGame(channelId, { readyTimeoutId: null });
   }
 
   const maps = getGameModeMaps(existingGame.mode);
@@ -585,14 +594,18 @@ const handleAllReady = (channelId: string): AllReadyStatus => {
     handleVoteComplete(channelId);
     return AllReadyStatus.AllVoted;
   } else {
+    const mapVoteTimeoutId = randomUUID();
     const mapVoteTimeout = setTimeout(() => {
+      timeoutMap.delete(mapVoteTimeoutId);
+      updateGame(channelId, { mapVoteTimeoutId: null });
       handleVoteComplete(channelId);
       handleSendMapVoteResult(channelId);
     }, MAP_VOTE_TIMEOUT);
+    timeoutMap.set(mapVoteTimeoutId, mapVoteTimeout);
 
     updateGame(channelId, {
       mapVoteAt: Date.now(),
-      mapVoteTimeout,
+      mapVoteTimeoutId,
       state: GameState.MapVote,
     });
     return AllReadyStatus.MapVote;
@@ -694,16 +707,23 @@ const addPlayer = (
       }
     } else {
       // At least one player is unready
+      const readyTimeoutId = randomUUID();
       const readyTimeout = setTimeout(async () => {
         // If this runs (will be cancelled if all players ready up), remove the unready players.
+        const game = getGame(channelId);
         const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
         store.dispatch({
           type: REMOVE_PLAYERS,
           payload: { channelId, playerIds: unreadyPlayerIds },
         });
+        timeoutMap.delete(readyTimeoutId);
+        if (game.readyMsgId) {
+          msgMap.delete(game.readyMsgId);
+        }
         updateGame(channelId, {
           state: GameState.AddRemove,
-          readyTimeout: null,
+          readyTimeoutId: null,
+          readyMsgId: null,
         });
 
         await sendMsg(
@@ -716,8 +736,9 @@ const addPlayer = (
           `Removed: ${unreadyPlayerIds.map((p) => mentionPlayer(p)).join(" ")}`
         );
       }, READY_TIMEOUT);
+      timeoutMap.set(readyTimeoutId, readyTimeout);
 
-      updateGame(channelId, { state: GameState.ReadyCheck, readyTimeout });
+      updateGame(channelId, { state: GameState.ReadyCheck, readyTimeoutId });
 
       return { msgs, status: AfterAdd.FullAndNotReady };
     }
@@ -766,7 +787,6 @@ const getUnreadyMsg = (channelId: string): Discord.MessageOptions => {
 const handleFindServer = async (channelId: string) => {
   updateGame(channelId, {
     findingServerAt: Date.now(),
-    mapVoteTimeout: null,
   });
 
   await sendMsg(
@@ -841,13 +861,6 @@ const handleFindServer = async (channelId: string) => {
     );
   }
 
-  // Set timers and msgs to null if they are set (can't stringify for saving in a `.json` file)
-  updateGame(channelId, {
-    readyTimeout: null,
-    mapVoteTimeout: null,
-    readyMessage: null,
-  });
-
   // Store game as JSON for debugging and historic data access for potentially map selection/recommendations (TODO)
   const game = getGame(channelId);
   const path = `${GAMES_PATH}/${Date.now()}.json`;
@@ -866,13 +879,16 @@ const handleAfterAddFullAndUnready = async (channelId: string) => {
 
   if (channel?.isText()) {
     const gameMode = getGame(channelId).mode;
-    const msg = await channel.send(unreadyMsg);
+    const readyMsg = await channel.send(unreadyMsg);
 
-    updateGame(channelId, { readyMessage: msg }); // Store the ready message so it can be updated if need be
+    const readyMsgId = randomUUID();
+    msgMap.set(readyMsgId, readyMsg);
+
+    updateGame(channelId, { readyMsgId }); // Store the ready message so it can be updated if need be
     for (const unreadyPlayerId of unreadyPlayerIds) {
       sendDM(
         unreadyPlayerId,
-        `Please ready up for you ${gameMode} PUG: ${msg.url}`
+        `Please ready up for you ${gameMode} PUG: ${readyMsg.url}`
       );
     }
   }
@@ -1037,9 +1053,14 @@ const removePlayer = (channelId: string, playerId: string): Msg[] => {
 
   const msgs = [];
 
-  if (existingGame.readyTimeout) {
-    clearTimeout(existingGame.readyTimeout);
-    updateGame(channelId, { readyTimeout: null });
+  const timeoutId = existingGame.readyTimeoutId;
+  if (timeoutId) {
+    const timeout = timeoutMap.get(timeoutId);
+    if (timeout) {
+      clearTimeout(timeout);
+      timeoutMap.delete(timeoutId);
+    }
+    updateGame(channelId, { readyTimeoutId: null });
     msgs.push(`Cancelling ready check.`);
   }
 
@@ -1146,9 +1167,12 @@ const readyPlayer = (
   ];
 
   // Edit/update the ready up message to show the current unready players
-  if (game.state === GameState.ReadyCheck && game.readyMessage) {
+  if (game.state === GameState.ReadyCheck && game.readyMsgId) {
     const unreadyMsg = getUnreadyMsg(channelId);
-    game.readyMessage.edit(unreadyMsg);
+    const readyMsg = msgMap.get(game.readyMsgId);
+    if (readyMsg) {
+      readyMsg.edit(unreadyMsg);
+    }
   }
 
   // Check if this ready up means all players are ready
@@ -1157,6 +1181,11 @@ const readyPlayer = (
     const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
     if (unreadyPlayerIds.length === 0) {
       // All players are ready
+      if (game.readyMsgId) {
+        msgMap.delete(game.readyMsgId);
+        updateGame(channelId, { readyMsgId: null });
+      }
+
       const allReadyStatus = handleAllReady(channelId);
 
       switch (allReadyStatus) {
@@ -1498,9 +1527,14 @@ const mapVote = (
     numVotes === getGameModeNumPlayers(game.mode)
   ) {
     // All players voted in the alloted time
-    if (game.mapVoteTimeout) {
-      clearTimeout(game.mapVoteTimeout);
-      updateGame(channelId, { mapVoteTimeout: null });
+    const timeoutId = game.mapVoteTimeoutId;
+    if (timeoutId) {
+      const timeout = timeoutMap.get(timeoutId);
+      if (timeout) {
+        clearTimeout(timeout);
+        timeoutMap.delete(timeoutId);
+      }
+      updateGame(channelId, { mapVoteTimeoutId: null });
     }
     handleVoteComplete(channelId);
     return { msgs, status: AfterVote.AllVoted };
@@ -1570,7 +1604,12 @@ const handleCommandReply = async (
   if (components) {
     reply.components = components;
   }
-  await interaction.reply(reply);
+  try {
+    await interaction.reply(reply);
+  } catch (e) {
+    console.error(reply);
+    throw e;
+  }
 };
 
 const handleEditCommandReply = async (
