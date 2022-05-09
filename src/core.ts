@@ -1764,7 +1764,8 @@ export const run = () => {
       }
       case Commands.Ready: {
         const minutesIn = interaction.options.getNumber("minutes");
-        const readyFor = minutesIn ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
+        const readyFor =
+          minutesIn !== null ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
         const { msgs, status } = readyPlayer(channelId, playerId, readyFor);
         await handleCommandReply(interaction, msgs);
         handleReadyStatus(channelId, status);
