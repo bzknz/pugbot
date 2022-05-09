@@ -32,9 +32,9 @@ const CHANNELS_PATH = `${BASE_PATH}/channels`;
 const GAME_ID = "tf2";
 
 // Timeout lengths
-const DEFAULT_READY_FOR = 1000 * 60 * 10; // 10 min
+const DEFAULT_READY_FOR = 1000 * 60 * 5; // 5 min
 const MAX_READY_FOR = 1000 * 60 * 30; // 30 min
-const MIN_READY_FOR = 1000 * 60 * 5; // 5 min
+const MIN_READY_FOR = 1000 * 60 * 0; // 0 min
 let READY_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 
@@ -1948,7 +1948,7 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
     assert.deepEqual(getMaps(testChannel1), [
-      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f6\ncp_metalworks_f2\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
+      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f7\ncp_metalworks_f4\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
     ]);
 
     // Start a game with /add
@@ -2021,7 +2021,7 @@ export const test = async () => {
     // Ready player 11
     assert(
       readyPlayer(testChannel1, "11", DEFAULT_READY_FOR).msgs[0].includes(
-        "<@11> is ready for 10min (until "
+        "<@11> is ready for 5min (until "
       )
     );
 
@@ -2240,7 +2240,7 @@ export const test = async () => {
     // Readying up a player should work at this stage
     assert(
       readyPlayer(testChannel1, "12", DEFAULT_READY_FOR).msgs[0].includes(
-        "<@12> is ready for 10min (until "
+        "<@12> is ready for 5min (until "
       )
     );
 
