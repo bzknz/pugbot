@@ -5,6 +5,7 @@ import Discord, {
   Intents,
   MessageActionRow,
   MessageButton,
+  MessageEditOptions,
   MessageEmbed,
   MessageOptions,
   Permissions,
@@ -747,7 +748,9 @@ const addPlayer = (
   }
 };
 
-const getUnreadyMsg = (channelId: string): Discord.MessageOptions => {
+function getUnreadyMsg(channelId: string, _: "new"): MessageOptions;
+function getUnreadyMsg(channelId: string, _: "edit"): MessageEditOptions;
+function getUnreadyMsg(channelId: string, _: "new" | "edit") {
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const numUnready = unreadyPlayerIds.length;
 
@@ -782,7 +785,7 @@ const getUnreadyMsg = (channelId: string): Discord.MessageOptions => {
         .join(" ")}`,
     };
   }
-};
+}
 
 const handleFindServer = async (channelId: string) => {
   updateGame(channelId, {
@@ -875,7 +878,7 @@ const handleAfterAddFullAndUnready = async (channelId: string) => {
   // Ask unready players to ready
   const channel = getDiscordChannel(channelId);
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
-  const unreadyMsg = getUnreadyMsg(channelId);
+  const unreadyMsg = getUnreadyMsg(channelId, "new");
 
   if (channel?.isText()) {
     const gameMode = getGame(channelId).mode;
@@ -1168,7 +1171,7 @@ const readyPlayer = (
 
   // Edit/update the ready up message to show the current unready players
   if (game.state === GameState.ReadyCheck && game.readyMsgId) {
-    const unreadyMsg = getUnreadyMsg(channelId);
+    const unreadyMsg = getUnreadyMsg(channelId, "edit");
     const readyMsg = msgMap.get(game.readyMsgId);
     if (readyMsg) {
       readyMsg.edit(unreadyMsg);
@@ -1949,7 +1952,7 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
     assert.deepEqual(getMaps(testChannel1), [
-      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f7\ncp_metalworks_f4\ncp_process_f9a\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
+      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f7\ncp_metalworks_f4\ncp_process_f11\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
     ]);
 
     // Start a game with /add
