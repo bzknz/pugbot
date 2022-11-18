@@ -50,6 +50,9 @@ const MIN_READY_FOR = 1000 * 60 * 0; // 0 min
 let READY_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 let MAP_VOTE_TIMEOUT = 1000 * 60; // 60 seconds (value changed in testing code)
 
+const NUM_MSG_RETRIES = 2; // Will amount to 3 including the first failed one
+const MSG_RETRY_TIMEOUT = 1000;
+
 const RCON_TIMEOUT = 5000;
 const RCON_DISCONNECT_AFTER = 5000;
 const MOCK_ASYNC_SLEEP_FOR = 500; // Used in testing for: looking for server, rcon commands etc
@@ -394,11 +397,12 @@ const getDiscordChannel = (channelId: string) =>
 const sendMsg = async (
   channelId: string,
   embedText: string,
-  mainText?: string
-): Promise<Message<boolean> | null> => {
+  mainText?: string,
+  retry = 0
+): Promise<void> => {
   if (getIsTestMode()) {
     console.log(channelId, embedText, mainText);
-    return null;
+    return;
   }
   const channel = getDiscordChannel(channelId);
 
@@ -408,17 +412,34 @@ const sendMsg = async (
   }
 
   if (channel?.type === ChannelType.GuildText) {
-    return channel.send(msgObj);
+    try {
+      await channel.send(msgObj);
+    } catch (e) {
+      console.error(e);
+      if (retry < NUM_MSG_RETRIES) {
+        setTimeout(() => {
+          sendMsg(channelId, embedText, mainText, retry + 1);
+        }, MSG_RETRY_TIMEOUT);
+      }
+    }
   } else {
     console.error(`channel ${channelId} is not a text channel.`);
-    return null;
   }
 };
 
-const sendDM = (playerId: string, msg: string) => {
+const sendDM = (playerId: string, msg: string, retry = 0) => {
   const user = client.users.cache.get(playerId);
   if (user) {
-    user.send(msg);
+    try {
+      user.send(msg);
+    } catch (e) {
+      console.error(e);
+      if (retry < NUM_MSG_RETRIES) {
+        setTimeout(() => {
+          sendDM(playerId, msg, retry + 1);
+        }, MSG_RETRY_TIMEOUT);
+      }
+    }
   }
 };
 
@@ -1610,7 +1631,8 @@ const handleCommandReply = async (
   ephemeral = false,
   components:
     | ActionRowBuilder<MessageActionRowComponentBuilder>[]
-    | undefined = undefined
+    | undefined = undefined,
+  retry = 0
 ) => {
   const msg = joinMsgs(msgs);
   const reply: InteractionReplyOptions = {
@@ -1623,8 +1645,12 @@ const handleCommandReply = async (
   try {
     await interaction.reply(reply);
   } catch (e) {
-    console.error(reply);
-    throw e;
+    console.error(e);
+    if (retry < NUM_MSG_RETRIES) {
+      setTimeout(() => {
+        handleCommandReply(interaction, msgs, ephemeral, components, retry + 1);
+      }, MSG_RETRY_TIMEOUT);
+    }
   }
 };
 
@@ -1633,7 +1659,8 @@ const handleEditCommandReply = async (
   msgs: Msg[],
   components:
     | ActionRowBuilder<MessageActionRowComponentBuilder>[]
-    | undefined = undefined
+    | undefined = undefined,
+  retry = 0
 ) => {
   const msg = joinMsgs(msgs);
   const reply: InteractionReplyOptions = {
@@ -1642,24 +1669,53 @@ const handleEditCommandReply = async (
   if (components) {
     reply.components = components;
   }
-  await interaction.editReply(reply);
+  try {
+    await interaction.editReply(reply);
+  } catch (e) {
+    console.error(e);
+    if (retry < NUM_MSG_RETRIES) {
+      setTimeout(() => {
+        handleEditCommandReply(interaction, msgs, components, retry + 1);
+      }, MSG_RETRY_TIMEOUT);
+    }
+  }
 };
 
 const handleButtonReply = async (
   interaction: ButtonInteraction<CacheType>,
   msgs: Msg[],
-  ephemeral = false
+  ephemeral = false,
+  retry = 0
 ) => {
   const msg = joinMsgs(msgs);
-  await interaction.reply({ embeds: [embedMsg(msg)], ephemeral });
+  try {
+    await interaction.reply({ embeds: [embedMsg(msg)], ephemeral });
+  } catch (e) {
+    console.error(e);
+    if (retry < NUM_MSG_RETRIES) {
+      setTimeout(() => {
+        handleButtonReply(interaction, msgs, ephemeral, retry + 1);
+      }, MSG_RETRY_TIMEOUT);
+    }
+  }
 };
 
 const handleEditButtonReply = async (
   interaction: ButtonInteraction<CacheType>,
-  msgs: Msg[]
+  msgs: Msg[],
+  retry = 0
 ) => {
   const msg = joinMsgs(msgs);
-  await interaction.editReply({ embeds: [embedMsg(msg)] });
+  try {
+    await interaction.editReply({ embeds: [embedMsg(msg)] });
+  } catch (e) {
+    console.error(e);
+    if (retry < NUM_MSG_RETRIES) {
+      setTimeout(() => {
+        handleEditButtonReply(interaction, msgs, retry + 1);
+      }, MSG_RETRY_TIMEOUT);
+    }
+  }
 };
 
 export const run = () => {
