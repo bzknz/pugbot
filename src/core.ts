@@ -20,7 +20,6 @@ import {
   MessageCreateOptions,
   PermissionResolvable,
   PermissionsBitField,
-  MessagePayload,
 } from "discord.js";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -55,7 +54,7 @@ const RCON_TIMEOUT = 5000;
 const RCON_DISCONNECT_AFTER = 5000;
 const MOCK_ASYNC_SLEEP_FOR = 500; // Used in testing for: looking for server, rcon commands etc
 const FIND_SERVER_ATTEMPTS = 60;
-const FIND_SERVER_INTERVAL = 5000;
+const FIND_SERVER_INTERVAL = 2000;
 
 // Button ids and button prefixes
 const MAP_VOTE_PREFIX = "map-vote-";
