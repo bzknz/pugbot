@@ -1,14 +1,26 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { strict as assert } from "assert";
 import { randomUUID } from "crypto";
-import Discord, {
-  Intents,
-  MessageActionRow,
-  MessageButton,
-  MessageEditOptions,
-  MessageEmbed,
-  MessageOptions,
-  Permissions,
+import {
+  ActionRowBuilder,
+  BaseMessageOptions,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
+  CacheType,
+  ChannelType,
+  ChatInputCommandInteraction,
+  Client,
+  CommandInteraction,
+  EmbedBuilder,
+  GatewayIntentBits,
+  InteractionReplyOptions,
+  Message,
+  MessageActionRowComponentBuilder,
+  MessageCreateOptions,
+  PermissionResolvable,
+  PermissionsBitField,
+  MessagePayload,
 } from "discord.js";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -70,10 +82,10 @@ const REMOVE_PLAYERS = "REMOVE_PLAYERS";
 const READY_PLAYER = "READY_PLAYER";
 const PLAYER_MAP_VOTE = "PLAYER_MAP_VOTE";
 
-const client = new Discord.Client({ intents: [Intents.FLAGS.GUILDS] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const timeoutMap = new Map<string, NodeJS.Timeout>();
-const msgMap = new Map<string, Discord.Message<boolean>>();
+const msgMap = new Map<string, Message<boolean>>();
 
 export enum Commands {
   Setup = "setup",
@@ -384,19 +396,19 @@ const sendMsg = async (
   channelId: string,
   embedText: string,
   mainText?: string
-): Promise<Discord.Message<boolean> | null> => {
+): Promise<Message<boolean> | null> => {
   if (getIsTestMode()) {
     console.log(channelId, embedText, mainText);
     return null;
   }
   const channel = getDiscordChannel(channelId);
 
-  const msgObj: MessageOptions = { embeds: [embedMsg(embedText)] };
+  const msgObj: BaseMessageOptions = { embeds: [embedMsg(embedText)] };
   if (mainText) {
     msgObj.content = mainText;
   }
 
-  if (channel?.isText()) {
+  if (channel?.type === ChannelType.GuildText) {
     return channel.send(msgObj);
   } else {
     console.error(`channel ${channelId} is not a text channel.`);
@@ -748,9 +760,7 @@ const addPlayer = (
   }
 };
 
-function getUnreadyMsg(channelId: string, _: "new"): MessageOptions;
-function getUnreadyMsg(channelId: string, _: "edit"): MessageEditOptions;
-function getUnreadyMsg(channelId: string, _: "new" | "edit") {
+function getUnreadyMsg(channelId: string): MessageCreateOptions {
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const numUnready = unreadyPlayerIds.length;
 
@@ -759,15 +769,15 @@ function getUnreadyMsg(channelId: string, _: "new" | "edit") {
     return {
       embeds: [embed],
       components: [],
-      content: null,
     };
   } else {
-    const row = new MessageActionRow().addComponents(
-      new MessageButton()
-        .setCustomId(READY_BUTTON)
-        .setLabel("Ready up!")
-        .setStyle("SUCCESS")
-    );
+    const row =
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(READY_BUTTON)
+          .setLabel("Ready up!")
+          .setStyle(ButtonStyle.Success)
+      );
 
     const embed = embedMsg(
       `:hourglass: ${
@@ -878,9 +888,9 @@ const handleAfterAddFullAndUnready = async (channelId: string) => {
   // Ask unready players to ready
   const channel = getDiscordChannel(channelId);
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
-  const unreadyMsg = getUnreadyMsg(channelId, "new");
+  const unreadyMsg = getUnreadyMsg(channelId);
 
-  if (channel?.isText()) {
+  if (channel?.type === ChannelType.GuildText) {
     const gameMode = getGame(channelId).mode;
     const readyMsg = await channel.send(unreadyMsg);
 
@@ -952,7 +962,7 @@ const sendMapVoteButtons = (channelId: string) => {
   );
 
   const channel = getDiscordChannel(channelId);
-  if (channel?.isText()) {
+  if (channel?.type === ChannelType.GuildText) {
     channel.send({
       embeds: [embed],
       components: rows,
@@ -1004,24 +1014,26 @@ const removePlayersFromOtherGames = (channelId: string) => {
   }
 };
 
-const getMapVoteButtons = (channelId: string): Discord.MessageActionRow[] => {
+const getMapVoteButtons = (
+  channelId: string
+): ActionRowBuilder<MessageActionRowComponentBuilder>[] => {
   const game = getGame(channelId);
   const maps = getGameModeMaps(game.mode);
-  const rows = [new MessageActionRow()];
+  const rows = [new ActionRowBuilder<MessageActionRowComponentBuilder>()];
 
   for (let x = 1; x <= maps.length; x++) {
     let lastRow = rows[rows.length - 1];
     if (lastRow.components.length === 5) {
       // Need a new row (max 5 buttons per row [Discord limitation])
-      rows.push(new MessageActionRow());
+      rows.push(new ActionRowBuilder<MessageActionRowComponentBuilder>());
       lastRow = rows[rows.length - 1];
     }
     const mapName = maps[x - 1];
     lastRow.addComponents(
-      new MessageButton()
+      new ButtonBuilder()
         .setCustomId(`${MAP_VOTE_PREFIX}${mapName}`)
         .setLabel(mapName)
-        .setStyle("SECONDARY")
+        .setStyle(ButtonStyle.Secondary)
     );
   }
 
@@ -1171,7 +1183,7 @@ const readyPlayer = (
 
   // Edit/update the ready up message to show the current unready players
   if (game.state === GameState.ReadyCheck && game.readyMsgId) {
-    const unreadyMsg = getUnreadyMsg(channelId, "edit");
+    const unreadyMsg = getUnreadyMsg(channelId);
     const readyMsg = msgMap.get(game.readyMsgId);
     if (readyMsg) {
       readyMsg.edit(unreadyMsg);
@@ -1579,11 +1591,11 @@ const getMaps = (channelId: string): Msg[] => {
   return [`Available maps for ${channel.mode}:\n${maps.join("\n")}`];
 };
 
-const embedMsg = (msg: string) => new MessageEmbed().setDescription(msg);
+const embedMsg = (msg: string) => new EmbedBuilder().setDescription(msg);
 
 const getHasPermission = (
-  permissions: string | Readonly<Discord.Permissions> | undefined,
-  permission: Discord.PermissionResolvable
+  permissions: string | Readonly<PermissionsBitField> | undefined,
+  permission: PermissionResolvable
 ): boolean => {
   if (typeof permissions !== "string" && permissions?.has(permission)) {
     return true;
@@ -1594,13 +1606,15 @@ const getHasPermission = (
 const joinMsgs = (msgs: Msg[]) => msgs.join(`\n`);
 
 const handleCommandReply = async (
-  interaction: Discord.CommandInteraction<Discord.CacheType>,
+  interaction: CommandInteraction<CacheType>,
   msgs: Msg[],
   ephemeral = false,
-  components: Discord.MessageActionRow[] | undefined = undefined
+  components:
+    | ActionRowBuilder<MessageActionRowComponentBuilder>[]
+    | undefined = undefined
 ) => {
   const msg = joinMsgs(msgs);
-  const reply: Discord.InteractionReplyOptions = {
+  const reply: InteractionReplyOptions = {
     embeds: [embedMsg(msg)],
     ephemeral,
   };
@@ -1616,12 +1630,14 @@ const handleCommandReply = async (
 };
 
 const handleEditCommandReply = async (
-  interaction: Discord.CommandInteraction<Discord.CacheType>,
+  interaction: CommandInteraction<CacheType>,
   msgs: Msg[],
-  components: Discord.MessageActionRow[] | undefined = undefined
+  components:
+    | ActionRowBuilder<MessageActionRowComponentBuilder>[]
+    | undefined = undefined
 ) => {
   const msg = joinMsgs(msgs);
-  const reply: Discord.InteractionReplyOptions = {
+  const reply: InteractionReplyOptions = {
     embeds: [embedMsg(msg)],
   };
   if (components) {
@@ -1631,7 +1647,7 @@ const handleEditCommandReply = async (
 };
 
 const handleButtonReply = async (
-  interaction: Discord.ButtonInteraction<Discord.CacheType>,
+  interaction: ButtonInteraction<CacheType>,
   msgs: Msg[],
   ephemeral = false
 ) => {
@@ -1640,7 +1656,7 @@ const handleButtonReply = async (
 };
 
 const handleEditButtonReply = async (
-  interaction: Discord.ButtonInteraction<Discord.CacheType>,
+  interaction: ButtonInteraction<CacheType>,
   msgs: Msg[]
 ) => {
   const msg = joinMsgs(msgs);
@@ -1675,9 +1691,14 @@ export const run = () => {
     switch (commandName) {
       case Commands.Setup: {
         if (
-          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_CHANNELS)
+          getHasPermission(
+            playerPermissions,
+            PermissionsBitField.Flags.ManageChannels
+          )
         ) {
-          const mode = interaction.options.getString("mode") as GameMode;
+          const mode = (
+            interaction as ChatInputCommandInteraction
+          ).options.getString("mode") as GameMode;
           const msgs = setGameMode(channelId, mode);
           await handleCommandReply(interaction, msgs);
         } else {
@@ -1706,7 +1727,10 @@ export const run = () => {
       }
       case Commands.Stop: {
         if (
-          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+          getHasPermission(
+            playerPermissions,
+            PermissionsBitField.Flags.ManageRoles
+          )
         ) {
           const msgs = stopGame(channelId);
           await handleCommandReply(interaction, msgs);
@@ -1745,7 +1769,10 @@ export const run = () => {
       }
       case Commands.Kick: {
         if (
-          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+          getHasPermission(
+            playerPermissions,
+            PermissionsBitField.Flags.ManageRoles
+          )
         ) {
           const targetPlayer = interaction.options.getUser("user");
           if (targetPlayer) {
@@ -1766,7 +1793,9 @@ export const run = () => {
         break;
       }
       case Commands.Ready: {
-        const minutesIn = interaction.options.getNumber("minutes");
+        const minutesIn = (
+          interaction as ChatInputCommandInteraction
+        ).options.getNumber("minutes");
         const readyFor =
           minutesIn !== null ? minutesIn * 1000 * 60 : DEFAULT_READY_FOR;
         const { msgs, status } = readyPlayer(channelId, playerId, readyFor);
@@ -1776,25 +1805,28 @@ export const run = () => {
       }
       case Commands.Vacate: {
         if (
-          getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)
+          getHasPermission(
+            playerPermissions,
+            PermissionsBitField.Flags.ManageRoles
+          )
         ) {
           // Send the user button options asking which server to vacate from.
 
           await interaction.deferReply({ ephemeral: true });
 
-          const row = new MessageActionRow();
+          const row = new ActionRowBuilder<MessageActionRowComponentBuilder>();
           const socketAddresses = getEnvSocketAddresses();
           for (const socketAddress of socketAddresses) {
             const details = await getServerDetails(socketAddress);
             row.addComponents(
-              new MessageButton()
+              new ButtonBuilder()
                 .setCustomId(`${VACATE_BUTTON_PREFIX}${socketAddress}`)
                 .setLabel(
                   `${details?.name ?? "unknown"} (${socketAddress}). Players: ${
                     details?.numPlayers ?? "unknown"
                   }. Map: ${details?.map ?? "unknown"}.`
                 )
-                .setStyle("DANGER")
+                .setStyle(ButtonStyle.Danger)
             );
           }
 
@@ -1874,7 +1906,12 @@ export const run = () => {
       await handleButtonReply(interaction, msgs, true);
       handleReadyStatus(channelId, status);
     } else if (customId.includes(VACATE_BUTTON_PREFIX)) {
-      if (getHasPermission(playerPermissions, Permissions.FLAGS.MANAGE_ROLES)) {
+      if (
+        getHasPermission(
+          playerPermissions,
+          PermissionsBitField.Flags.ManageRoles
+        )
+      ) {
         await interaction.deferReply();
         const socketAddress = customId.split(VACATE_BUTTON_PREFIX)[1];
         const msgs = await vacate(socketAddress);
@@ -1952,7 +1989,7 @@ export const test = async () => {
     assert.deepEqual(kickPlayer(testChannel1, "1"), [NO_GAME_STARTED]);
 
     assert.deepEqual(getMaps(testChannel1), [
-      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f7\ncp_metalworks_f4\ncp_process_f11\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_clearcut_b15d\nkoth_product_final",
+      "Available maps for SIXES:\ncp_granary_pro_rc8\ncp_gullywash_f9\ncp_metalworks_f4\ncp_process_f11\ncp_prolands_rc2p\ncp_reckoner_rc6\ncp_snakewater_final1\ncp_sunshine\nkoth_bagel_rc5\nkoth_clearcut_b15d\nkoth_product_final",
     ]);
 
     // Start a game with /add
