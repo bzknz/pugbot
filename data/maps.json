@@ -9,26 +9,28 @@
   ],
   "SIXES": [
     "cp_granary_pro_rc8",
-    "cp_gullywash_f7",
+    "cp_gullywash_f9",
     "cp_metalworks_f4",
     "cp_process_f11",
     "cp_prolands_rc2p",
     "cp_reckoner_rc6",
     "cp_snakewater_final1",
     "cp_sunshine",
+    "koth_bagel_rc5",
     "koth_clearcut_b15d",
     "koth_product_final"
   ],
   "ULTIDUO": ["koth_ultiduo_r_b7", "ultiduo_baloo_v2"],
   "TEST": [
     "cp_granary_pro_rc8",
-    "cp_gullywash_f7",
+    "cp_gullywash_f9",
     "cp_metalworks_f4",
     "cp_process_f11",
     "cp_prolands_rc2p",
     "cp_reckoner_rc6",
     "cp_snakewater_final1",
     "cp_sunshine",
+    "koth_bagel_rc5",
     "koth_clearcut_b15d",
     "koth_product_final"
   ]
