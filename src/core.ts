@@ -430,16 +430,14 @@ const sendMsg = async (
 const sendDM = (playerId: string, msg: string, retry = 0) => {
   const user = client.users.cache.get(playerId);
   if (user) {
-    try {
-      user.send(msg);
-    } catch (e) {
+    user.send(msg).catch((e) => {
       console.error(e);
       if (retry < NUM_MSG_RETRIES) {
         setTimeout(() => {
           sendDM(playerId, msg, retry + 1);
         }, MSG_RETRY_TIMEOUT);
       }
-    }
+    });
   }
 };
 
