@@ -141,6 +141,7 @@ type Game = {
   readyMsgId: null | string; // To be edited with current unready players status
   mapVoteAt: null | number;
   mapVoteTimeoutId: null | string;
+  mapVotesMsgId: null | string; // To be edited with current count of votes
   winningMaps: null | string[]; // Set if there are multiple tied winning maps based on player votes
   maxVoteCount: null | number;
   map: null | string;
@@ -525,6 +526,7 @@ const startGame = (channelId: string): Msg[] => {
     readyMsgId: null,
     mapVoteAt: null,
     mapVoteTimeoutId: null,
+    mapVotesMsgId: null,
     winningMaps: null,
     maxVoteCount: null,
     map: null,
@@ -968,7 +970,36 @@ const handleAllReadyAllVoted = async (channelId: string) => {
   handleSendMapVoteResult(channelId);
 };
 
-const sendMapVoteButtons = (channelId: string) => {
+const padWithSpaces = (s: string, minLength: number) => {
+  const length = s.length;
+  const toAdd = minLength - length;
+  let out = s;
+  for (let x = 0; x < toAdd; x++) {
+    out += " ";
+  }
+  return out;
+};
+
+const MIN_SPACE_BETWEEN = 4;
+const getMapVotesMsg = (channelId: string) => {
+  const mapVoteCounts = getMapVoteCounts(channelId);
+  const withVotes = Object.entries(mapVoteCounts).filter(([_, val]) => val > 0);
+  const maxMapNameLength = Math.max(...withVotes.map((m) => m[0].length));
+  const minLength = maxMapNameLength + MIN_SPACE_BETWEEN;
+
+  const votesText = withVotes
+    .sort((a, b) => (a[1] < b[1] ? -1 : 1))
+    .map(([key, val]) => `${padWithSpaces(key, minLength)}${val}`)
+    .join(`\n`);
+  const text = `:ballot_box: Current votes:\n\`\`\`${
+    votesText === "" ? "No votes yet." : votesText
+  }\`\`\``;
+  console.log(text);
+  const embed = embedMsg(text);
+  return { embeds: [embed] };
+};
+
+const sendMapVoteButtons = async (channelId: string) => {
   const rows = getMapVoteButtons(channelId);
 
   const game = getGame(channelId);
@@ -976,7 +1007,7 @@ const sendMapVoteButtons = (channelId: string) => {
   const embed = embedMsg(
     `:ballot_box: Map vote starting now. Click the map you want to play (click another to change your vote). Waiting ${
       MAP_VOTE_TIMEOUT / 1000
-    } seconds for votes.`
+    } seconds for votes. You can prevote with \`/vote\` after adding.`
   );
 
   const channel = getDiscordChannel(channelId);
@@ -986,12 +1017,18 @@ const sendMapVoteButtons = (channelId: string) => {
       components: rows,
       content: `Vote now: ${players.map((p) => mentionPlayer(p.id)).join(" ")}`,
     });
+
+    const mapVotesMsg = getMapVotesMsg(channelId);
+    const sentMapVotesMsg = await channel.send(mapVotesMsg);
+    const mapVotesMsgId = randomUUID();
+    msgMap.set(mapVotesMsgId, sentMapVotesMsg);
+    updateGame(channelId, { mapVotesMsgId });
   }
 };
 
 const handleAllReadyMapVote = async (channelId: string) => {
   await sendMsg(channelId, ALL_READY_MSG);
-  sendMapVoteButtons(channelId);
+  await sendMapVoteButtons(channelId);
 };
 
 const removePlayers = (channelId: string, playerIds: string[]) => {
@@ -1552,8 +1589,17 @@ const mapVote = (
   });
 
   const msgs = [`You voted for ${mapVote}.`];
-
   const game = getGame(channelId);
+
+  // Edit/update the vote status/tally message to show the current votes
+  if (game.state === GameState.MapVote && game.mapVotesMsgId) {
+    const mapVotesMsg = getMapVotesMsg(channelId);
+    const sentMapVotesMsg = msgMap.get(game.mapVotesMsgId);
+    if (sentMapVotesMsg) {
+      sentMapVotesMsg.edit(mapVotesMsg);
+    }
+  }
+
   const numVotes = getPlayers(game).filter((p) => p.mapVote).length;
   if (
     game.state === GameState.MapVote &&
