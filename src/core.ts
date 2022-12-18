@@ -992,7 +992,7 @@ const getMapVotesMsg = (channelId: string) => {
   const minLength = maxMapNameLength + MIN_SPACE_BETWEEN;
 
   const votesText = withVotes
-    .sort((a, b) => (a[1] < b[1] ? -1 : 1))
+    .sort((a, b) => (a[1] > b[1] ? -1 : 1))
     .map(([key, val]) => `${padWithSpaces(key, minLength)}${val}`)
     .join(`\n`);
   const text = `:ballot_box: Current votes:\n\`\`\`${
