@@ -792,6 +792,7 @@ function getUnreadyMsg(channelId: string): MessageCreateOptions {
     return {
       embeds: [embed],
       components: [],
+      content: "",
     };
   } else {
     const row =
