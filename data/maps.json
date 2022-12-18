@@ -1,11 +1,11 @@
 {
   "BBALL": ["ctf_ballin_sky"],
   "HIGHLANDER": [
-    "pl_borneo",
-    "pl_badwater",
-    "pl_upward",
     "cp_steel",
-    "koth_lakeside_final"
+    "koth_lakeside_final",
+    "pl_badwater",
+    "pl_borneo",
+    "pl_upward"
   ],
   "SIXES": [
     "cp_granary_pro_rc8",
@@ -21,6 +21,15 @@
     "koth_product_final"
   ],
   "ULTIDUO": ["koth_ultiduo_r_b7", "ultiduo_baloo_v2"],
+  "FOURS": [
+    "cp_warmfrost_rc1",
+    "koth_airfield_b7",
+    "koth_brazil",
+    "koth_highpass",
+    "koth_maple_ridge_rc1",
+    "koth_product_final",
+    "koth_undergrove_rc1"
+  ],
   "TEST": [
     "cp_granary_pro_rc8",
     "cp_gullywash_f9",

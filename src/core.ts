@@ -125,6 +125,7 @@ export enum GameMode {
   Highlander = "HIGHLANDER",
   Sixes = "SIXES",
   Ultiduo = "ULTIDUO",
+  Fours = "FOURS",
   Test = "TEST", // Just one player
 }
 
@@ -240,6 +241,8 @@ const getGameModeNumPlayers = (gameMode: GameMode): number => {
       return 12;
     case GameMode.Ultiduo:
       return 4;
+    case GameMode.Fours:
+      return 8;
     case GameMode.Test:
       return 1;
     default:
@@ -2113,6 +2116,9 @@ export const test = async () => {
     ]);
     assert.deepEqual(setGameMode(testChannel1, GameMode.Highlander), [
       "Game mode set to HIGHLANDER.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Fours), [
+      "Game mode set to FOURS.",
     ]);
     assert.deepEqual(setGameMode(testChannel1, GameMode.Test), [
       "Game mode set to TEST.",
