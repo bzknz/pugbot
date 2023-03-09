@@ -122,11 +122,12 @@ enum GameState {
 
 export enum GameMode {
   BBall = "BBALL",
-  Highlander = "HIGHLANDER",
-  Sixes = "SIXES",
-  Ultiduo = "ULTIDUO",
   Fours = "FOURS",
+  Highlander = "HIGHLANDER",
+  Prolander = "PROLANDER",
+  Sixes = "SIXES",
   Test = "TEST", // Just one player
+  Ultiduo = "ULTIDUO",
 }
 
 type Players = { [playerId: string]: Player };
@@ -235,16 +236,18 @@ const getGameModeNumPlayers = (gameMode: GameMode): number => {
   switch (gameMode) {
     case GameMode.BBall:
       return 4;
-    case GameMode.Highlander:
-      return 18;
-    case GameMode.Sixes:
-      return 12;
-    case GameMode.Ultiduo:
-      return 4;
     case GameMode.Fours:
       return 8;
+    case GameMode.Highlander:
+      return 18;
+    case GameMode.Prolander:
+      return 14;
+    case GameMode.Sixes:
+      return 12;
     case GameMode.Test:
       return 1;
+    case GameMode.Ultiduo:
+      return 4;
     default:
       throw new Error("Unknown game type.");
   }
@@ -2112,18 +2115,25 @@ export const test = async () => {
     assert.deepEqual(setGameMode(testChannel1, GameMode.BBall), [
       "Game mode set to BBALL.",
     ]);
-    assert.deepEqual(setGameMode(testChannel1, GameMode.Ultiduo), [
-      "Game mode set to ULTIDUO.",
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Fours), [
+      "Game mode set to FOURS.",
     ]);
     assert.deepEqual(setGameMode(testChannel1, GameMode.Highlander), [
       "Game mode set to HIGHLANDER.",
     ]);
-    assert.deepEqual(setGameMode(testChannel1, GameMode.Fours), [
-      "Game mode set to FOURS.",
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Prolander), [
+      "Game mode set to PROLANDER.",
+    ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Sixes), [
+      "Game mode set to SIXES.",
     ]);
     assert.deepEqual(setGameMode(testChannel1, GameMode.Test), [
       "Game mode set to TEST.",
     ]);
+    assert.deepEqual(setGameMode(testChannel1, GameMode.Ultiduo), [
+      "Game mode set to ULTIDUO.",
+    ]);
+
     assert.deepEqual(setGameMode(testChannel1, GameMode.Sixes), [
       "Game mode set to SIXES.",
     ]);

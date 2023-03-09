@@ -22,11 +22,12 @@ const run = async () => {
           .setRequired(true)
           .addChoices(
             { name: GameMode.BBall, value: GameMode.BBall },
-            { name: GameMode.Highlander, value: GameMode.Highlander },
-            { name: GameMode.Sixes, value: GameMode.Sixes },
-            { name: GameMode.Ultiduo, value: GameMode.Ultiduo },
             { name: GameMode.Fours, value: GameMode.Fours },
-            { name: GameMode.Test, value: GameMode.Test }
+            { name: GameMode.Highlander, value: GameMode.Highlander },
+            { name: GameMode.Prolander, value: GameMode.Prolander },
+            { name: GameMode.Sixes, value: GameMode.Sixes },
+            { name: GameMode.Test, value: GameMode.Test },
+            { name: GameMode.Ultiduo, value: GameMode.Ultiduo }
           )
       ),
     new SlashCommandBuilder()
