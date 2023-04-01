@@ -17,7 +17,6 @@ import {
   InteractionReplyOptions,
   Message,
   MessageActionRowComponentBuilder,
-  MessageCreateOptions,
   PermissionResolvable,
   PermissionsBitField,
 } from "discord.js";
@@ -786,7 +785,7 @@ const addPlayer = (
   }
 };
 
-function getUnreadyMsg(channelId: string): MessageCreateOptions {
+function getUnreadyMsg(channelId: string) {
   const unreadyPlayerIds = getUnreadyPlayerIds(channelId);
   const numUnready = unreadyPlayerIds.length;
 
@@ -1917,7 +1916,6 @@ export const run = () => {
           )
         ) {
           // Send the user button options asking which server to vacate from.
-
           await interaction.deferReply({ ephemeral: true });
 
           const row = new ActionRowBuilder<MessageActionRowComponentBuilder>();
